@@ -66,6 +66,7 @@ const _considerVehicle   = true;
 const _max_VehicleConsum = 4000;                                                // max Wert wenn Fahrzeug lädt
 const isVehicleConnDP   = 'evcc.0.loadpoint.1.status.connected';                // ist Fahrzeug gerade an der Ladeseule DP
 const vehicleConsumDP   = 'evcc.0.loadpoint.1.status.chargePower';              // angaben in W
+const evccModusDP       = 'evcc.0.loadpoint.1.status.mode';                     // lademodus
 
 let _isVehicleConn      = false;
 let _vehicleConsum      = 0;
@@ -275,8 +276,15 @@ async function processing() {
 
     // fülle den ertragsarray
     let pvfc                       = getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
-
+    
     setState(tibberDP + 'extra.pvLadeZeitenArray', pvfc, true);
+
+    let pvBis = '--:--';
+    if (pvfc.length > 0) {            
+        pvBis = pvfc[(pvfc.length - 1)][4];
+    }
+
+    setState(tibberDP + 'extra.PV_Abschluss', pvBis, true);
 
     _istLadezeit = false;
     _istEntladezeit = false;
@@ -747,17 +755,10 @@ async function processing() {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
         
-        let latesttime = 0;
+        let latesttime = pvBis;
 
         if (restladezeit == 0 || ((restladezeit * 2) <= pvfc.length && pvfc.length > 0)) {          // überschreibe die restladezeit mit möglichen pv ladezeiten
             restladezeit = Math.ceil(pvfc.length / 2);                          
-        }
-
-        setState(tibberDP + 'extra.PV_Abschluss', '--:--', true);
-
-        if (pvfc.length > 0) {            
-            latesttime = pvfc[(pvfc.length - 1)][4];
-            setState(tibberDP + 'extra.PV_Abschluss', latesttime, true);
         }
         
         if (_debug && latesttime) {
@@ -799,7 +800,7 @@ async function processing() {
             }
 
             if (_debug) {
-                console.info('Ausgabe :_max_pwr ' + _max_pwr);
+                console.info('Ausgabe :_max_pwr ' + _max_pwr + ' ist ladezeit ' + _istLadezeit);
             }           
 
             const verbrauchJetztOhneAuto = _verbrauchJetzt - _vehicleConsum;

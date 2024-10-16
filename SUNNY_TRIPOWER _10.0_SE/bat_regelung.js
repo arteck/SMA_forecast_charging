@@ -228,6 +228,8 @@ createUserStates(userDataDP, false, ['strom.PV_Leistung_aktuell', { 'name': 'PV_
     setState(pV_Leistung_aktuellDP, 0, true);
 });
 
+createUserStates(userDataDP, false, ['strom.Batt_Status', { 'name': 'Batterie Status', 'type': 'string', 'read': true, 'write': false, 'role': 'value'}]);
+
 Zeile entfernen  */ 
 
 setState(communicationRegisters.fedInSpntCom, _InitCom_Aus);
@@ -327,13 +329,17 @@ async function processing() {
 
     setState(tibberDP + 'extra.BatterieRestladezeit', restladezeit, true);
 
+    const battsts = battStatus == 2291 ? 'Batterie Standby' : battStatus == 3664 ? 'Notladebetrieb' : battStatus == 2292 ? 'Batterie laden' : battStatus == 2293 ? 'Batterie entladen' : 'Aus';
+    setState(userDataDP + 'strom.Batt_Status', battsts, true);
+
+    
     if (_debug) {
         console.info('_tick___________________________ ' + _tick);
         console.info('Verbrauch jetzt_________________ ' + _verbrauchJetzt + ' W');
         console.info('Einspeisung_____________________ ' + aufrunden(2, _einspeisung) + ' W');
         console.info('PV Produktion___________________ ' + _dc_now + ' W');       
         console.info('Batt_SOC________________________ ' + _batsoc + ' %');
-        const battsts = battStatus == 2291 ? 'Batterie Standby' : battStatus == 3664 ? 'Notladebetrieb' : battStatus == 2292 ? 'Batterie laden' : battStatus == 2293 ? 'Batterie entladen' : 'Aus';
+        //const battsts = battStatus == 2291 ? 'Batterie Standby' : battStatus == 3664 ? 'Notladebetrieb' : battStatus == 2292 ? 'Batterie laden' : battStatus == 2293 ? 'Batterie entladen' : 'Aus';
         console.info('Batt_Status_____________________ ' + battsts + ' = ' + battStatus);
         console.info('Restladezeit____________________ ' + restladezeit + ' h');
         console.info('Restlademenge___________________ ' + restlademenge + ' Wh');

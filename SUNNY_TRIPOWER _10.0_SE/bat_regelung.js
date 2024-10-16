@@ -353,14 +353,16 @@ async function processing() {
         _tibber_active_idx          = 0;                                                        // initialisiere
 
         const tibberPvForcast       = getState(tibberPvForcastDP).val;
-        const tibberPoihigh         = sortArrayByCurrentHour(tibberPvForcast, true, _hhJetzt);  // sortiert ab jetzt
+        const tibberPoiAll          = sortArrayByCurrentHour(tibberPvForcast, true, _hhJetzt);  // sortiert ab jetzt
         const tibberPoihighSorted   = sortArrayByCurrentHour(tibberPvForcast, false, '00');     // sortiert ab 0 Uhr
         
-        //console.info('tibberPoihigh ' +  JSON.stringify(tibberPoihigh));
+        //console.info('tibberPoiAll ' +  JSON.stringify(tibberPoiAll));
         //console.info('tibberPoihighSorted ' +  JSON.stringify(tibberPoihighSorted));
 
         let tibberPoilow = tibberPoilowErmittlung(tibberPoihighSorted);
                
+        //console.info('tibberPoilow ' +  JSON.stringify(tibberPoilow));    
+
         _klimaLoad = 0;
         _sundownReduzierung = _sundownReduzierungStunden;
 
@@ -474,8 +476,8 @@ async function processing() {
         }
 
         if (_debug) {
-            console.info('Tibber tibberPoihigh.length ' + tibberPoihigh.length);
-            //    console.info('tibberPoihigh vor nachladen: ' + JSON.stringify(tibberPoihigh));
+            console.info('Tibber tibberPoiAll.length ' + tibberPoiAll.length);
+            //    console.info('tibberPoiAll vor nachladen: ' + JSON.stringify(tibberPoiAll));
         }
 
         // Nachladestunden Ermittlung
@@ -487,12 +489,12 @@ async function processing() {
         let curbatwh   = aufrunden(2, ((_batteryCapacity / 100) * _batsoc));     // batterie ladung 
 
         if (batlefthrs < hrstorun) {
-            for (let h = 0; h < tibberPoihigh.length; h++) {
-                if (tibberPoihigh[h][0] <= _start_charge) {
-                    prclow.push(tibberPoihigh[h]);
+            for (let h = 0; h < tibberPoiAll.length; h++) {
+                if (tibberPoiAll[h][0] <= _start_charge) {
+                    prclow.push(tibberPoiAll[h]);
                 }
-                if (tibberPoihigh[h][0] > _stop_discharge) {
-                    prchigh.push(tibberPoihigh[h]);
+                if (tibberPoiAll[h][0] > _stop_discharge) {
+                    prchigh.push(tibberPoiAll[h]);
                 }
             }
 
@@ -517,7 +519,7 @@ async function processing() {
 
             let nachladeStunden = aufrunden(2, (Math.max(restlademenge / (_batteryLadePowerMax * _wr_efficiency), 0) * 2));
 
-            // neuaufbau tibberPoihigh ohne Nachladestunden, billigstunden
+            // neuaufbau ohne Nachladestunden, billigstunden
             if (_debug) {
              //   console.info(JSON.stringify(prclow)); 
                 console.info('Nachladestunden ' + nachladeStunden + ' curbatwh ' + curbatwh + ' nachladeMengeWh ' + nachladeMengeWh + ' prchigh.length ' + prchigh.length);
@@ -560,16 +562,16 @@ async function processing() {
 
         _entladeZeitenArray         = [];      
         let entladeZeitenArrayVis   = [];    
-        let tibberPoihighNew        = filterZeit14UhrOrSunup(tibberPoihigh, _sunup);    // sortiert nach preis und stunden grösser jetzt und bis zu sunup oder 14 uhr
-        let lefthrs                 = Math.ceil(batlefthrs *2);                         // Batterielaufzeit laut SOC
+        let tibberPoihigh           = filterZeit14UhrOrSunup(tibberPoiAll, _sunup);    // sortiert nach preis und stunden grösser jetzt und bis zu sunup oder 14 uhr
+        let lefthrs                 = Math.ceil(batlefthrs *2);                         // Batterielaufzeit laut SOC muss doppelt gerechnet werden da 30 min für tibber abgleich
 
         if (_debug) {
-            console.info('tibberPoihighNew.length '+ tibberPoihighNew.length);
-          //  console.info('tibberPoihighNew nach filter ' + JSON.stringify(tibberPoihigh));
+            console.info('tibberPoihigh.length '+ tibberPoihigh.length);
+          //  console.info('tibberPoihigh nach filter ' + JSON.stringify(tibberPoihigh));
         }
 
-        if (lefthrs > 0 && lefthrs > tibberPoihighNew.length) {        // limmitiere auf Tibber höchstpreise
-            lefthrs = tibberPoihighNew.length;
+        if (lefthrs > 0 && lefthrs > tibberPoihigh.length) {        // limmitiere auf Tibber höchstpreise
+            lefthrs = tibberPoihigh.length;
         }
 
         if (_debug) {
@@ -577,9 +579,9 @@ async function processing() {
         }
         
         for (let d = 0; d < lefthrs; d++) {
-            if (tibberPoihighNew[d][0] > _stop_discharge) {                                                   
-                //console.info('alle Entladezeiten: ' + tibberPoihighNew[d][1] + '-' + tibberPoihighNew[d][2] + ' Preis ' + tibberPoihighNew[d][0] + ' Fahrzeug zieht ' + _vehicleConsum + ' W');
-                _entladeZeitenArray.push(tibberPoihighNew[d]);                               
+            if (tibberPoihigh[d][0] > _stop_discharge) {                                                   
+                //console.info('alle Entladezeiten: ' + tibberPoihigh[d][1] + '-' + tibberPoihigh[d][2] + ' Preis ' + tibberPoihigh[d][0] + ' Fahrzeug zieht ' + _vehicleConsum + ' W');
+                _entladeZeitenArray.push(tibberPoihigh[d]);                               
             }  
         }
 

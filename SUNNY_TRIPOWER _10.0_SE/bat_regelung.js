@@ -120,7 +120,7 @@ let _pvforecastTodayArray       = [];
 let _pvforecastTomorrowArray    = [];
 
 let _notLadung                  = false;
-let _entladung_zeitfenster      = false;
+
 
 // für tibber
 let _tibberNutzenSteuerung      = true;    //wird _tibberNutzenAutomatisch benutzt (dyn. Strompreis)
@@ -240,7 +240,6 @@ console.info('starte ladenNachPrognose mit debug ' + _debug);
 // bei start immer initialisieren
 if (_tibberPreisJetzt <= _stop_discharge && _dc_now <= _verbrauchJetzt) {
     console.warn('starte direkt mit Begrenzung da Preis unter schwelle');
-    _entladung_zeitfenster = true;
 }
 
 // hole daten ab nach start
@@ -349,11 +348,7 @@ async function processing() {
         _max_pwr    = (_dc_now - _verbrauchJetzt) * -1;   // vorbelegung zum laden     
     } 
 
-    if (_tibberNutzenSteuerung) {
-   //      if (_tibber_active_idx == 88) { // komme aus notladung
-   //         setState(spntComCheckDP, 888, true);
-   //     }
-
+    if (_tibberNutzenSteuerung) {  
         const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
         _tibber_active_idx          = 0;                                                        // initialisiere
 
@@ -589,7 +584,12 @@ async function processing() {
         }
 
       //       console.warn(JSON.stringify(_entladeZeitenArray));
-        
+      
+      // sortiere die entladezeiten
+        const entladeZeitenArrayAll     = sortHourToSunup(sortArrayByCurrentHour(_entladeZeitenArray, true, _hhJetzt), _sunup);
+        _entladeZeitenArray             = entladeZeitenArrayAll.arrOut; 
+        entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
+
         if (_dc_now < _verbrauchJetzt && !starteLadungTibber) {                            
             // wenn genug PV am Tag aber gerade nicht genug Sonne aber tibber klein genug
             if (_debug) {
@@ -616,23 +616,22 @@ async function processing() {
                     _istEntladezeit = true;
                     _tibber_active_idx = 22;
                     _entladeZeitenArray = [];
-                    _entladeZeitenArray.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis
+                    entladeZeitenArrayVis = [];
+                    entladeZeitenArrayVis.push([0.0,"99:99","--:--"]);  //  initialisiere für Vis
                 }
             } else {
                 if (_entladeZeitenArray.length > 0) {  
-                    if (!_nurEntladestunden) {
-                        _entladeZeitenArray = []; 
-                    }                                                            // wir haben höchstpreise                       
                     entladezeitEntscheidung();
                 } else {
+                    _entladeZeitenArray = [];
+                    entladeZeitenArrayVis = [];
+                    entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis
                     _tibber_active_idx = 23;    
                 }                                                             
             }
         }
 
-        const entladeZeitenArrayAll     = sortHourToSunup(sortArrayByCurrentHour(_entladeZeitenArray, true, _hhJetzt), _sunup);
-        _entladeZeitenArray             = entladeZeitenArrayAll.arrOut; 
-        entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
+        setState(tibberDP + 'extra.entladeZeitenArray', entladeZeitenArrayVis,  true); 
 
         // in der nacht starten setzen
         if (_tibberPreisJetzt <= _start_charge && _batsoc < 100 && _dc_now < 1) {           // wir sind in der nacht
@@ -652,8 +651,6 @@ async function processing() {
                 console.info('pvwh ' + vergleichepvWh + ' ist kleiner als ' + (_baseLoad + _klimaLoad) * 24 * _wr_efficiency);
             }
         }
-
-        setState(tibberDP + 'extra.entladeZeitenArray', entladeZeitenArrayVis,  true); 
 
         // starte die ladung
         if (starteLadungTibber) {
@@ -689,14 +686,15 @@ async function processing() {
          //   console.info('ladeZeitenArray ' + JSON.stringify(ladeZeitenArray));
         }
 
-       // stoppe die Ladung/Entladung
+       // stoppe die Entladung
         if (_tibberPreisJetzt <= _stop_discharge) {
-            if (_entladeZeitenArray.length > 0 && pvfc.length < 1) {
+            if (_istEntladezeit && pvfc.length < 1) {
                 if (_debug) {                                        
                     console.warn('Stoppe Entladung, Preis jetzt ' + _tibberPreisJetzt + ' ct/kWh unter Batterieschwelle von ' + aufrunden(2, _stop_discharge) + ' ct/kWh oder battSoc = 0 ist ' + _batsoc );
                     console.info(' _SpntCom ' + _SpntCom + ' _max_pwr ' + _max_pwr + ' _tibber_active_idx ' + _tibber_active_idx);                    
                 }
-                if (_tibber_active_idx != 22 || batlefthrs < hrstorun) {  // aber nicht wenn die ladung bis zum ende reicht
+
+                if (_tibber_active_idx != 22) {  // aber nicht wenn die ladung bis zum ende reicht
                     _tibber_active_idx = 3;
                 }
             }
@@ -1070,18 +1068,26 @@ async function berechneVerbrauch(pvJetzt) {
 
 function entladezeitEntscheidung() {
     for (let c = 0; c < _entladeZeitenArray.length; c++) {
-        if (_debug) {
-            console.warn('entladezeit ' + JSON.stringify(_entladeZeitenArray[c]));
+        
+        if (!_nurEntladestunden) {
+            _entladeZeitenArray = [];
+            _istEntladezeit = true;
+            break;
         }
+
+        if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
+            break;
+        }
+
+        if (_debug) {
+            console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
+        }
+
         if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
-            if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
-                break;
-            } else {
-                //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
-                _istEntladezeit = true;
-                _tibber_active_idx = 2;
-                break;
-            }
+            //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
+            _istEntladezeit = true;
+            _tibber_active_idx = 2;
+            break;
         }
     }
 }

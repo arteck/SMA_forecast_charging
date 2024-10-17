@@ -597,7 +597,9 @@ async function processing() {
             }
             
             if (pvwhToday > ((_baseLoad + _klimaLoad) * _toSundownhr * _wr_efficiency) && _tibberPreisJetzt <= _stop_discharge && _dc_now < 1) {
-                _tibber_active_idx = 20;          
+                if (!_nurEntladestunden) {
+                    _tibber_active_idx = 20;          
+                }
             } 
         }          
 
@@ -1350,11 +1352,7 @@ function tibber_active_auswertung() {
             
             if (!_istLadezeit) {
                 _SpntCom = _InitCom_An;    
-            } else {
-                if (_dc_now < _verbrauchJetzt) {
-                    _SpntCom = _InitCom_Aus;       
-                }
-            }
+            } 
            
             break;
         case 1:                             //      _tibber_active_idx = 1;    Nachladezeit

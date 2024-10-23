@@ -503,7 +503,7 @@ async function processing() {
             })
 
             //nachlademenge Wh nach höchstpreisen am Tag            
-            let nachladeMengeWh = ((prchigh.length) * ((_baseLoad + _klimaLoad) /2) * 1 / _wr_efficiency);   // ich mag alles in klammern
+            let nachladeMengeWh = ((prchigh.length * ((_baseLoad + _klimaLoad) /2)) / _wr_efficiency);   // ich mag alles in klammern
             
             if (hrstorun < 24 && !_snowmode) {
                 nachladeMengeWh = nachladeMengeWh - (pvwhToday * _wr_efficiency);
@@ -537,7 +537,8 @@ async function processing() {
             //if (nachladeStunden > 0 && prclow.length > 0 && pvwhToday < curbatwh) {    
             //   oder
             let pvWh = 0;            
-            if (compareTime('00:00', null, ">", null)) {
+            //if (compareTime('00:00', null, ">", null)) {
+            if (compareTime(_sundown, '00:00', 'between')) {
                 pvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
             } else {
                 pvWh = pvwhToday;                 // danach den tageswert
@@ -648,7 +649,8 @@ async function processing() {
         if (_tibberPreisJetzt <= _start_charge && _batsoc < 100 && _dc_now < 1) {           // wir sind in der nacht
             let vergleichepvWh = 0;
             
-            if (compareTime('00:00', null, ">", null)) {
+            //if (compareTime('00:00', null, ">", null)) {
+            if (compareTime(_sundown, '00:00', 'between')) {
                 vergleichepvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
             } else {
                 vergleichepvWh = pvwhToday;                 // danach den tageswert
@@ -1079,28 +1081,26 @@ async function berechneVerbrauch(pvJetzt) {
 // ------------------------------------------- functions
 
 function entladezeitEntscheidung() {
-    for (let c = 0; c < _entladeZeitenArray.length; c++) {
-        
-        if (!_nurEntladestunden) {
-            _entladeZeitenArray = [];
-            _istEntladezeit = true;
-            break;
-        }
+    if (_nurEntladestunden) {
+        for (let c = 0; c < _entladeZeitenArray.length; c++) {                
+            if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
+                break;
+            }
 
-        if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
-            break;
-        }
+            if (_debug) {
+                console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
+            }
 
-        if (_debug) {
-            console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
+            if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
+                //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
+                _istEntladezeit = true;
+                _tibber_active_idx = 2;
+                break;
+            }
         }
-
-        if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
-            //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
-            _istEntladezeit = true;
-            _tibber_active_idx = 2;
-            break;
-        }
+    } else {
+        _entladeZeitenArray = [];
+        _istEntladezeit = true;
     }
 }
 

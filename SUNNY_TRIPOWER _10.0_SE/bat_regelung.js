@@ -962,22 +962,32 @@ async function getSunTime() {
     const tomorrow      = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() + 1);  
     const yesterday     = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() - 1);  
 
+    const now = (_hhJetzt * 60) + _today.getMinutes();
+
     let sunup;
-    let sundown  = getAstroDate('sunsetStart').getHours() + ':' + getAstroDate('sunsetStart').getMinutes().toString().padStart(2, '0');
+    let sundown  = (getAstroDate('sunsetStart').getHours() * 60) + getAstroDate('sunsetStart').getMinutes();
 
-    let sunupTodayAstro    = getAstroDate('sunriseEnd').getHours() + ':' + getAstroDate('sunriseEnd').getMinutes().toString().padStart(2, '0');                             // aufgang heute
-    let sunupTomorrowAstro = getAstroDate('sunriseEnd', tomorrow).getHours() + ':' + getAstroDate('sunriseEnd', tomorrow).getMinutes().toString().padStart(2, '0');         // aufgang nächster Tag
-    let sunupYesterday     = getAstroDate('sunriseEnd', yesterday).getHours() + ':' + getAstroDate('sunriseEnd', yesterday).getMinutes().toString().padStart(2, '0');       // aufgang gestern
+    let sunupTodayAstro    = (getAstroDate('sunriseEnd').getHours() * 60) + getAstroDate('sunriseEnd').getMinutes();       
+    let sunupTomorrowAstro = (getAstroDate('sunriseEnd', tomorrow).getHours() * 60) + getAstroDate('sunriseEnd', tomorrow).getMinutes();
+    let sunupYesterday     = (getAstroDate('sunriseEnd', yesterday).getHours() * 60) + getAstroDate('sunriseEnd', yesterday).getMinutes();
 
-    if (compareTime(_nowHour, sunupTodayAstro, "<", null)) {
+    // console.warn(sunupYesterday + ' ' + sunupTodayAstro + ' ' + sunupTomorrowAstro);
+
+    if (now < sunupTodayAstro) {
+        //console.warn('B1 ');
         sunup = sunupYesterday;
-    } else if (compareTime(_nowHour, sundown, ">", null)) {
+    } else if (now > sundown) {
+        //console.warn('B2 ');
         sunup = sunupTomorrowAstro;
     } else {
+        //console.warn('B3 ');
         sunup = sunupTodayAstro;   
     }
 
-    return {sunup, sundown};
+    const sundownStr = getHoursMinutes(sundown);
+    const sunupStr   = getHoursMinutes(sunup);
+  
+    return {sunupStr, sundownStr};
 }
 
 async function vorVerarbeitung() {
@@ -987,8 +997,8 @@ async function vorVerarbeitung() {
 
     const sunTime = await getSunTime();   
 
-    _sundown = sunTime.sundown;
-    _sunup   = sunTime.sunup;
+    _sundown = sunTime.sundownStr;
+    _sunup   = sunTime.sunupStr;
 
     if (compareTime(_sundown, _sunup, 'between')) {                             // nachts ist ehh nix los also kann 0 rein
         _dc_now = 0;   
@@ -1285,9 +1295,20 @@ async function holePVDatenAb() {
     return {pvforecastTodayArray, pvforecastTomorrowArray};
 }
 
-function getMinHours(timeInHours) {
+function getMinHours(timeInHours) {               // eingabe in stunden
     let hours = Math.floor(timeInHours);
     let minutes = Math.round((timeInHours - hours) * 60);
+
+    // Formatiere die Stunden und Minuten für das 24-Stunden-Format
+    let formattedHours = hours.toString().padStart(2, '0');
+    let formattedMinutes = minutes.toString().padStart(2, '0');
+
+    return `${formattedHours}:${formattedMinutes}`;
+}
+
+function getHoursMinutes(totalMinutes) {        // eingabe in minuten
+    let hours = Math.floor(totalMinutes / 60);
+    let minutes = totalMinutes % 60;
 
     // Formatiere die Stunden und Minuten für das 24-Stunden-Format
     let formattedHours = hours.toString().padStart(2, '0');

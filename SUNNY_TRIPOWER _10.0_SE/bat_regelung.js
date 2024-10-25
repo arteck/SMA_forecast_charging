@@ -71,8 +71,6 @@ const evccModusDP       = 'evcc.0.loadpoint.1.status.mode';                     
 let _isVehicleConn      = false;
 let _vehicleConsum      = 0;
 
-let _hhJetzt = getHH();
-
 const communicationRegisters = {   
     fedInSpntCom: 'modbus.0.holdingRegisters.3.40151_Kommunikation',                  
     fedInPwrAtCom: 'modbus.0.holdingRegisters.3.40149_Wirkleistungvorgabe',
@@ -135,11 +133,12 @@ let _tomorrow_kW                        = 0;
 let _entladeZeitenArray                 = [];
 
 let _sunup              = '00:00';
+let _sunupAstro         = '00:00';
 let _sundown            = '00:00';
-
+let _sundownAstro       = '00:00';
+let _sunupTodayAstro    = '00:00';
 let _ladezeitVon        = '00:00';
 let _ladezeitBis        = '00:00';
-let _nowHour            = '00:00';
 let _hhJetzt            = getHH();
 
 createUserStates(userDataDP, false, [tibberStromDP + 'debug', { 'name': 'debug', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
@@ -273,7 +272,7 @@ async function processing() {
     setState(pV_Leistung_aktuellDP, dc_now_DP, true);
 
     // fülle den ertragsarray
-    let pvfc                       = await getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
+    let pvfc                       = getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
     
     setState(tibberDP + 'extra.pvLadeZeitenArray', pvfc, true);
 
@@ -348,6 +347,7 @@ async function processing() {
     } 
 
     if (_tibberNutzenSteuerung) {  
+        const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
         _tibber_active_idx          = 0;                                                        // initialisiere
 
         const tibberPvForcast       = getState(tibberPvForcastDP).val;
@@ -357,7 +357,7 @@ async function processing() {
         //console.info('tibberPoiAll ' +  JSON.stringify(tibberPoiAll));
         //console.info('tibberPoihighSorted ' +  JSON.stringify(tibberPoihighSorted));
 
-        let tibberPoilow = await tibberPoilowErmittlung(tibberPoihighSorted);
+        let tibberPoilow = tibberPoilowErmittlung(tibberPoihighSorted);
                
         //console.info('tibberPoilow ' +  JSON.stringify(tibberPoilow));    
 
@@ -410,11 +410,15 @@ async function processing() {
 
         setState(tibberDP + 'extra.PV_Prognose', aufrunden(2, pvwhToday), true);
         
+        _sundown       = _sundownAstro; 
+        _sunup         = _sunupTodayAstro;
+
         if (_debug) {
-            console.info('Nachtfenster nach Astro : ' + _sundown + ' - ' + _sunup);
+            console.info('Nachtfenster nach Astro : ' + _sundownAstro + ' - ' + _sunupAstro);
         }     
 
-        let nextDay = false;
+        let nextDay         = false;
+        let sunupTomorrow   = _sunupAstro;
 
         if (!_snowmode) {   
             if (_pvforecastTodayArray.length > 0) {
@@ -430,25 +434,29 @@ async function processing() {
                 }
             }
             
-            if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
+            if (_pvforecastTomorrowArray.length > 0) {
                 for (let su = 0; su < 48; su++) {
                     if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {  
-                        _sunup = _pvforecastTomorrowArray[su][0]; 
-                        nextDay = true;
+                        sunupTomorrow = _pvforecastTomorrowArray[su][0]; 
                         break;
                     }
                 }           
             }
         }
 
-        hrstorun     = Number(zeitDifferenzInStunden(_nowHour, _sunup, nextDay));
-        _toSundownhr = Number(zeitDifferenzInStunden(_nowHour, _sundown, false));
+        if (_hhJetzt > parseInt(_sunup.slice(0, 2))) {        
+            _sunup = sunupTomorrow;
+            nextDay = true;
+        }      
+
+        hrstorun     = Number(zeitDifferenzInStunden(nowHour, _sunup, nextDay));
+        _toSundownhr = Number(zeitDifferenzInStunden(nowHour, _sundown, false));
 
         if (_debug) {
             console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup + '. bis zum nächsten Sonnenaufgang sind es ' + hrstorun + ' hrstorun und zum nächsten Untergang toSundownhr ' + _toSundownhr);
         }        
 
-        if (compareTime(_sunup, _sundown, 'between')) {  // Astro stunde 
+        if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {  // Astro stunde 
             pvwhToday = 0;                                              // initialisiere damit die entladung läuft
             let t = 0;
             if (_toSundownhr > 0) {                
@@ -613,7 +621,7 @@ async function processing() {
 
         if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
             if (batlefthrs >= hrstorun) { 
-                if (compareTime(_nowHour, await addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                     if (_debug) {
                         console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
                     }
@@ -625,7 +633,7 @@ async function processing() {
                 }
             } else {
                 if (_entladeZeitenArray.length > 0) {  
-                    await entladezeitEntscheidung();
+                    entladezeitEntscheidung();
                 } else {
                     _tibber_active_idx = 23; 
                     _entladeZeitenArray = [];
@@ -639,12 +647,14 @@ async function processing() {
 
         // in der nacht starten setzen
         if (_tibberPreisJetzt <= _start_charge && _batsoc < 100 && _dc_now < 1) {           // wir sind in der nacht
-            let vergleichepvWh = pvwhToday;
+            let vergleichepvWh = 0;
             
             //if (compareTime('00:00', null, ">", null)) {
             if (compareTime(_sundown, '00:00', 'between')) {
                 vergleichepvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
-            } 
+            } else {
+                vergleichepvWh = pvwhToday;                 // danach den tageswert
+            }
             
             if (vergleichepvWh < (_baseLoad + _klimaLoad) * 24 * _wr_efficiency) {
                 starteLadungTibber = true;
@@ -663,7 +673,7 @@ async function processing() {
                 } 
             }                   
 
-            tibberPoilow = await doppelteRausAusArray(tibberPoilow);
+            tibberPoilow = doppelteRausAusArray(tibberPoilow);
 
             if (_debug) {
                 console.error('restladezeit : ' + restladezeit + ' tibberPoilow.length ' + tibberPoilow.length / 2);
@@ -718,7 +728,7 @@ async function processing() {
             console.warn('-->> vor tibber_active_auswertung : _SpntCom ' + _SpntCom + ' _tibber_active_idx ' + _tibber_active_idx);
         }
         
-        await tibber_active_auswertung();
+        tibber_active_auswertung();
     }   
 
     setState(tibberDP + 'extra.tibberProtokoll', _tibber_active_idx, true);
@@ -752,7 +762,7 @@ async function processing() {
         _prognoseNutzenSteuerung = false;
     }    
 
-    if (_prognoseNutzenSteuerung && _dc_now > 0) {    
+    if (_prognoseNutzenSteuerung && _dc_now > 0) {    // compareTime(_sunupTodayAstro, _sundownAstro, 'between')
         if (_debug) {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
@@ -827,11 +837,11 @@ async function processing() {
 
                     if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
                         _tibber_active_idx = 6;
-                        await entladezeitEntscheidung();
+                        entladezeitEntscheidung();
                     }
 
                     // komme aus tibber laufzeit
-                    await tibber_active_auswertung();
+                    tibber_active_auswertung();
 
                     if (_debug) {
                         console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
@@ -956,52 +966,16 @@ schedule('0 0 * * *', function() {
     _pvforecastTomorrowArray    = [];
 });
   
-
-async function getSunTime() {
-    
-    const tomorrow      = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() + 1);  
-    const yesterday     = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() - 1);  
-
-    const now = (_hhJetzt * 60) + _today.getMinutes();
-
-    let sunup;
-    let sundown  = (getAstroDate('sunsetStart').getHours() * 60) + getAstroDate('sunsetStart').getMinutes();
-
-    let sunupTodayAstro    = (getAstroDate('sunriseEnd').getHours() * 60) + getAstroDate('sunriseEnd').getMinutes();       
-    let sunupTomorrowAstro = (getAstroDate('sunriseEnd', tomorrow).getHours() * 60) + getAstroDate('sunriseEnd', tomorrow).getMinutes();
-    let sunupYesterday     = (getAstroDate('sunriseEnd', yesterday).getHours() * 60) + getAstroDate('sunriseEnd', yesterday).getMinutes();
-
-    // console.warn(sunupYesterday + ' ' + sunupTodayAstro + ' ' + sunupTomorrowAstro);
-
-    if (now < sunupTodayAstro) {
-        //console.warn('B1 ');
-        sunup = sunupYesterday;
-    } else if (now > sundown) {
-        //console.warn('B2 ');
-        sunup = sunupTomorrowAstro;
-    } else {
-        //console.warn('B3 ');
-        sunup = sunupTodayAstro;   
-    }
-
-    const sundownStr = await getHoursMinutes(sundown);
-    const sunupStr   = await getHoursMinutes(sunup);
-  
-    return {sunupStr, sundownStr};
-}
-
 async function vorVerarbeitung() {
-    _hhJetzt               = getHH();
-    _today                 = new Date();
-    _nowHour               = _hhJetzt + ':' + _today.getMinutes();         
 
-    const sunTime = await getSunTime();   
-
-    _sundown = sunTime.sundownStr;
-    _sunup   = sunTime.sunupStr;
-
-    if (compareTime(_sundown, _sunup, 'between')) {                             // nachts ist ehh nix los also kann 0 rein
-        _dc_now = 0;   
+    // berechne Astrozeiten für später
+    const tomorrow      = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() + 1);  
+    _sundownAstro       = getAstroDate('sunsetStart').getHours() + ':' + getAstroDate('sunsetStart').getMinutes().toString().padStart(2, '0');                           // untergang heute  
+    _sunupTodayAstro    = getAstroDate('sunriseEnd').getHours() + ':' + getAstroDate('sunriseEnd').getMinutes().toString().padStart(2, '0');                             // aufgang heute
+    _sunupAstro         = getAstroDate('sunriseEnd', tomorrow).getHours() + ':' + getAstroDate('sunriseEnd', tomorrow).getMinutes().toString().padStart(2, '0');         // aufgang nächster Tag
+                                                
+    if (compareTime(_sundownAstro, _sunupAstro, 'between')) {                                           // nachts ist ehh nix los also kann 0 rein
+        _dc_now = 0;    
     } else {
         const dc1 = await getStateAsync(inputRegisters.dc1);
         const dc2 = await getStateAsync(inputRegisters.dc2);
@@ -1009,6 +983,9 @@ async function vorVerarbeitung() {
     }
     
     _verbrauchJetzt             = await berechneVerbrauch(_dc_now);
+
+    _hhJetzt                    = getHH();
+    _today                      = new Date();
     _batsoc                     = Math.min(getState(inputRegisters.batSoC).val, 100);                   //batsoc = Batterieladestand vom WR
     _bydDirectSOC               = Math.min(getState(bydDirectSOCDP).val, 100);                          // nimm den bydSoc da der WR nicht oft diesen übermittelt
     _debug                      = getState(tibberDP + 'debug').val;
@@ -1038,7 +1015,7 @@ async function vorVerarbeitung() {
     }
 
     // ---     check ob notladung nötig
-    _notLadung = await notLadungCheck();
+    _notLadung = notLadungCheck();
 
     if (_notLadung) {         
         _tibber_active_idx            = 88          // notladung mrk
@@ -1053,7 +1030,7 @@ async function vorVerarbeitung() {
 }
 
 
-async function notLadungCheck() {    
+function notLadungCheck() {    
     if (_bydDirectSOC < 5 && _dc_now < _verbrauchJetzt) {
         if (_bydDirectSOC != _bydDirectSOCMrk) {
             console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
@@ -1103,7 +1080,7 @@ async function berechneVerbrauch(pvJetzt) {
 }
 // ------------------------------------------- functions
 
-async function entladezeitEntscheidung() {
+function entladezeitEntscheidung() {
     if (_nurEntladestunden) {
         for (let c = 0; c < _entladeZeitenArray.length; c++) {                
             if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
@@ -1244,7 +1221,7 @@ function sortArrayByCurrentHour(zeiten, toEnd, currentHour) {
     return sortedArray;
 }
 
-async function getPvErtrag() {
+function getPvErtrag() {
     let pvfc = [];
     
     if (_pvforecastTodayArray.length > 0) {
@@ -1295,7 +1272,7 @@ async function holePVDatenAb() {
     return {pvforecastTodayArray, pvforecastTomorrowArray};
 }
 
-function getMinHours(timeInHours) {               // eingabe in stunden
+function getMinHours(timeInHours) {
     let hours = Math.floor(timeInHours);
     let minutes = Math.round((timeInHours - hours) * 60);
 
@@ -1306,33 +1283,7 @@ function getMinHours(timeInHours) {               // eingabe in stunden
     return `${formattedHours}:${formattedMinutes}`;
 }
 
-async function getHoursMinutes(totalMinutes) {        // eingabe in minuten
-    let hours = Math.floor(totalMinutes / 60);
-    let minutes = totalMinutes % 60;
-
-    // Formatiere die Stunden und Minuten für das 24-Stunden-Format
-    let formattedHours = hours.toString().padStart(2, '0');
-    let formattedMinutes = minutes.toString().padStart(2, '0');
-
-    return `${formattedHours}:${formattedMinutes}`;
-}
-
-async function addMinutesToTime(timeStr, minutesToAdd) {
-    let timeParts = timeStr.split(':');
-    let date = new Date();
-    date.setHours(parseInt(timeParts[0], 10));
-    date.setMinutes(parseInt(timeParts[1], 10));
-
-    date.setMinutes(date.getMinutes() + minutesToAdd);
-
-    let newHours = date.getHours().toString().padStart(2, '0');
-    let newMinutes = date.getMinutes().toString().padStart(2, '0');
-
-    // Zurückgeben der neuen Zeit im HH:MM-Format
-    return `${newHours}:${newMinutes}`;
-}
-
-async function doppelteRausAusArray(arr) {
+function doppelteRausAusArray(arr) {
   let uniqueArray = [];
   let seen = new Set();
 
@@ -1347,7 +1298,7 @@ async function doppelteRausAusArray(arr) {
   return uniqueArray;
 }
 
-async function tibberPoilowErmittlung(arraySorted) {
+function tibberPoilowErmittlung(arraySorted) {
     let poiTemp = arraySorted;   
 
     poiTemp.sort(function (a, b) {  // niedrig preis sort
@@ -1367,7 +1318,22 @@ async function tibberPoilowErmittlung(arraySorted) {
     return tibberPoilow;
 }
 
-async function tibber_active_auswertung() {
+function addMinutesToTime(timeStr, minutesToAdd) {
+    let timeParts = timeStr.split(':');
+    let date = new Date();
+    date.setHours(parseInt(timeParts[0], 10));
+    date.setMinutes(parseInt(timeParts[1], 10));
+
+    date.setMinutes(date.getMinutes() + minutesToAdd);
+
+    let newHours = date.getHours().toString().padStart(2, '0');
+    let newMinutes = date.getMinutes().toString().padStart(2, '0');
+
+    // Zurückgeben der neuen Zeit im HH:MM-Format
+    return `${newHours}:${newMinutes}`;
+}
+
+function tibber_active_auswertung() {
     _max_pwr = _mindischrg;
   
     switch (_tibber_active_idx) {
@@ -1380,7 +1346,7 @@ async function tibber_active_auswertung() {
                     _tibber_active_idx = tibPoint;
                 }
                 
-                await tibber_active_auswertung();
+                tibber_active_auswertung();
                 break;
             }
             
@@ -1428,3 +1394,4 @@ async function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
+

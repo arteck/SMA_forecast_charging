@@ -135,12 +135,11 @@ let _tomorrow_kW                        = 0;
 let _entladeZeitenArray                 = [];
 
 let _sunup              = '00:00';
-let _sunupAstro         = '00:00';
 let _sundown            = '00:00';
-let _sundownAstro       = '00:00';
-let _sunupTodayAstro    = '00:00';
+
 let _ladezeitVon        = '00:00';
 let _ladezeitBis        = '00:00';
+let _nowHour            = '00:00';
 let _hhJetzt            = getHH();
 
 createUserStates(userDataDP, false, [tibberStromDP + 'debug', { 'name': 'debug', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
@@ -349,7 +348,6 @@ async function processing() {
     } 
 
     if (_tibberNutzenSteuerung) {  
-        const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
         _tibber_active_idx          = 0;                                                        // initialisiere
 
         const tibberPvForcast       = getState(tibberPvForcastDP).val;
@@ -412,15 +410,11 @@ async function processing() {
 
         setState(tibberDP + 'extra.PV_Prognose', aufrunden(2, pvwhToday), true);
         
-        _sundown       = _sundownAstro; 
-        _sunup         = _sunupTodayAstro;
-
         if (_debug) {
-            console.info('Nachtfenster nach Astro : ' + _sundownAstro + ' - ' + _sunupAstro);
+            console.info('Nachtfenster nach Astro : ' + _sundown + ' - ' + _sunup);
         }     
 
-        let nextDay         = false;
-        let sunupTomorrow   = _sunupAstro;
+        let nextDay = false;
 
         if (!_snowmode) {   
             if (_pvforecastTodayArray.length > 0) {
@@ -436,29 +430,25 @@ async function processing() {
                 }
             }
             
-            if (_pvforecastTomorrowArray.length > 0) {
+            if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
                 for (let su = 0; su < 48; su++) {
                     if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {  
-                        sunupTomorrow = _pvforecastTomorrowArray[su][0]; 
+                        _sunup = _pvforecastTomorrowArray[su][0]; 
+                        nextDay = true;
                         break;
                     }
                 }           
             }
         }
 
-        if (_hhJetzt > parseInt(_sunup.slice(0, 2))) {        
-            _sunup = sunupTomorrow;
-            nextDay = true;
-        }      
-
-        hrstorun     = Number(zeitDifferenzInStunden(nowHour, _sunup, nextDay));
-        _toSundownhr = Number(zeitDifferenzInStunden(nowHour, _sundown, false));
+        hrstorun     = Number(zeitDifferenzInStunden(_nowHour, _sunup, nextDay));
+        _toSundownhr = Number(zeitDifferenzInStunden(_nowHour, _sundown, false));
 
         if (_debug) {
             console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup + '. bis zum nächsten Sonnenaufgang sind es ' + hrstorun + ' hrstorun und zum nächsten Untergang toSundownhr ' + _toSundownhr);
         }        
 
-        if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {  // Astro stunde 
+        if (compareTime(_sunup, _sundown, 'between')) {  // Astro stunde 
             pvwhToday = 0;                                              // initialisiere damit die entladung läuft
             let t = 0;
             if (_toSundownhr > 0) {                
@@ -623,7 +613,7 @@ async function processing() {
 
         if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
             if (batlefthrs >= hrstorun) { 
-                if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                if (compareTime(_nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                     if (_debug) {
                         console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
                     }
@@ -649,14 +639,12 @@ async function processing() {
 
         // in der nacht starten setzen
         if (_tibberPreisJetzt <= _start_charge && _batsoc < 100 && _dc_now < 1) {           // wir sind in der nacht
-            let vergleichepvWh = 0;
+            let vergleichepvWh = pvwhToday;
             
             //if (compareTime('00:00', null, ">", null)) {
             if (compareTime(_sundown, '00:00', 'between')) {
                 vergleichepvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
-            } else {
-                vergleichepvWh = pvwhToday;                 // danach den tageswert
-            }
+            } 
             
             if (vergleichepvWh < (_baseLoad + _klimaLoad) * 24 * _wr_efficiency) {
                 starteLadungTibber = true;
@@ -764,7 +752,7 @@ async function processing() {
         _prognoseNutzenSteuerung = false;
     }    
 
-    if (_prognoseNutzenSteuerung && _dc_now > 0) {    // compareTime(_sunupTodayAstro, _sundownAstro, 'between')
+    if (_prognoseNutzenSteuerung && _dc_now > 0) {    
         if (_debug) {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
@@ -968,16 +956,42 @@ schedule('0 0 * * *', function() {
     _pvforecastTomorrowArray    = [];
 });
   
-async function vorVerarbeitung() {
 
-    // berechne Astrozeiten für später
+async function getSunTime() {
+    
     const tomorrow      = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() + 1);  
-    _sundownAstro       = getAstroDate('sunsetStart').getHours() + ':' + getAstroDate('sunsetStart').getMinutes().toString().padStart(2, '0');                           // untergang heute  
-    _sunupTodayAstro    = getAstroDate('sunriseEnd').getHours() + ':' + getAstroDate('sunriseEnd').getMinutes().toString().padStart(2, '0');                             // aufgang heute
-    _sunupAstro         = getAstroDate('sunriseEnd', tomorrow).getHours() + ':' + getAstroDate('sunriseEnd', tomorrow).getMinutes().toString().padStart(2, '0');         // aufgang nächster Tag
-                                                
-    if (compareTime(_sundownAstro, _sunupAstro, 'between')) {                                           // nachts ist ehh nix los also kann 0 rein
-        _dc_now = 0;    
+    const yesterday     = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() - 1);  
+
+    let sunup;
+    let sundown  = getAstroDate('sunsetStart').getHours() + ':' + getAstroDate('sunsetStart').getMinutes().toString().padStart(2, '0');
+
+    let sunupTodayAstro    = getAstroDate('sunriseEnd').getHours() + ':' + getAstroDate('sunriseEnd').getMinutes().toString().padStart(2, '0');                             // aufgang heute
+    let sunupTomorrowAstro = getAstroDate('sunriseEnd', tomorrow).getHours() + ':' + getAstroDate('sunriseEnd', tomorrow).getMinutes().toString().padStart(2, '0');         // aufgang nächster Tag
+    let sunupYesterday     = getAstroDate('sunriseEnd', yesterday).getHours() + ':' + getAstroDate('sunriseEnd', yesterday).getMinutes().toString().padStart(2, '0');       // aufgang gestern
+
+    if (compareTime(_nowHour, sunupTodayAstro, "<", null)) {
+        sunup = sunupYesterday;
+    } else if (compareTime(_nowHour, sundown, ">", null)) {
+        sunup = sunupTomorrowAstro;
+    } else {
+        sunup = sunupTodayAstro;   
+    }
+
+    return {sunup, sundown};
+}
+
+async function vorVerarbeitung() {
+    _hhJetzt               = getHH();
+    _today                 = new Date();
+    _nowHour               = _hhJetzt + ':' + _today.getMinutes();         
+
+    const sunTime = await getSunTime();   
+
+    _sundown = sunTime.sundown;
+    _sunup   = sunTime.sunup;
+
+    if (compareTime(_sundown, _sunup, 'between')) {                             // nachts ist ehh nix los also kann 0 rein
+        _dc_now = 0;   
     } else {
         const dc1 = await getStateAsync(inputRegisters.dc1);
         const dc2 = await getStateAsync(inputRegisters.dc2);
@@ -985,9 +999,6 @@ async function vorVerarbeitung() {
     }
     
     _verbrauchJetzt             = await berechneVerbrauch(_dc_now);
-
-    _hhJetzt                    = getHH();
-    _today                      = new Date();
     _batsoc                     = Math.min(getState(inputRegisters.batSoC).val, 100);                   //batsoc = Batterieladestand vom WR
     _bydDirectSOC               = Math.min(getState(bydDirectSOCDP).val, 100);                          // nimm den bydSoc da der WR nicht oft diesen übermittelt
     _debug                      = getState(tibberDP + 'debug').val;
@@ -1396,4 +1407,3 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
-

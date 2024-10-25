@@ -422,18 +422,20 @@ async function processing() {
         let nextDay         = false;
         let sunupTomorrow   = _sunupAstro;
 
-        if (!_snowmode && _pvforecastTodayArray.length > 0) {   
-            if (pvfc.length > 0) {
-                _sundown = pvfc[(pvfc.length - 1)][4];
-            } 
+        if (!_snowmode) {   
+            if (_pvforecastTodayArray.length > 0) {
+                if (pvfc.length > 0) {
+                    _sundown = pvfc[(pvfc.length - 1)][4];
+                } 
 
-            for (let su = 0; su < 48; su++) {
-                if (_pvforecastTodayArray[su][2] >= (_baseLoad + _klimaLoad)) {   
-                    _sunup = _pvforecastTodayArray[su][0];     
-                    break;
+                for (let su = 0; su < 48; su++) {
+                    if (_pvforecastTodayArray[su][2] >= (_baseLoad + _klimaLoad)) {   
+                        _sunup = _pvforecastTodayArray[su][0];     
+                        break;
+                    }
                 }
             }
-
+            
             if (_pvforecastTomorrowArray.length > 0) {
                 for (let su = 0; su < 48; su++) {
                     if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {  
@@ -449,7 +451,7 @@ async function processing() {
             nextDay = true;
         }      
 
-        hrstorun    = Number(zeitDifferenzInStunden(nowHour, _sunup, nextDay));
+        hrstorun     = Number(zeitDifferenzInStunden(nowHour, _sunup, nextDay));
         _toSundownhr = Number(zeitDifferenzInStunden(nowHour, _sundown, false));
 
         if (_debug) {
@@ -1301,7 +1303,7 @@ function doppelteRausAusArray(arr) {
 function tibberPoilowErmittlung(arraySorted) {
     let poiTemp = arraySorted;   
 
-    poiTemp.sort(function (a, b) {  // niedrieg preis sort
+    poiTemp.sort(function (a, b) {  // niedrig preis sort
         return a[0] - b[0];
     });
 
@@ -1394,3 +1396,4 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
+

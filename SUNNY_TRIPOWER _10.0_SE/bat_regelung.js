@@ -419,7 +419,6 @@ async function processing() {
         }     
 
         let nextDay         = false;
-        let sunupTomorrow   = _sunupAstro;
 
         if (!_snowmode) {   
             if (_pvforecastTodayArray.length > 0) {
@@ -435,29 +434,27 @@ async function processing() {
                 }
             }
             
-            if (_pvforecastTomorrowArray.length > 0) {
+            if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
                 for (let su = 0; su < 48; su++) {
                     if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {  
-                        sunupTomorrow = _pvforecastTomorrowArray[su][0]; 
+                        _sunup = _pvforecastTomorrowArray[su][0];
+                        nextDay = true; 
                         break;
                     }
                 }           
             }
         }
-
-        if (_hhJetzt > parseInt(_sunup.slice(0, 2))) {        
-            _sunup = sunupTomorrow;
-            nextDay = true;
-        }      
+          
 
         hrstorun     = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));
         _toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, false));
 
         if (_debug) {
-            console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup + '. bis zum nächsten Sonnenaufgang sind es ' + hrstorun + ' hrstorun und zum nächsten Untergang toSundownhr ' + _toSundownhr);
+            console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup);
+            console.warn('bis nächster Sonnenaufgang hrstorun '  + hrstorun + ' bis nächster Untergang toSundownhr ' + _toSundownhr);
         }        
 
-        if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {  // Astro stunde 
+        if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {  
             pvwhToday = 0;                                              // initialisiere damit die entladung läuft
             let t = 0;
             if (_toSundownhr > 0) {                
@@ -534,16 +531,11 @@ async function processing() {
           //    console.info('prchigh Nachladestunden ' + JSON.stringify(prchigh));
             }
             
+            let pvWh = pvwhToday;            
 
-            //if (nachladeStunden > 0 && prclow.length > 0 && pvwhToday < curbatwh) {    
-            //   oder
-            let pvWh = 0;            
-            //if (compareTime('00:00', null, ">", null)) {
             if (compareTime(_sundown, '00:00', 'between')) {
                 pvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
-            } else {
-                pvWh = pvwhToday;                 // danach den tageswert
-            }
+            } 
 
             if (nachladeStunden > 0 && prclow.length > 0 && pvWh < (_baseLoad + _klimaLoad) * 24 * _wr_efficiency) {                 
                 // aufbau der zeiten zum nachladen weiter im _tibber_active_idx = 5
@@ -650,7 +642,6 @@ async function processing() {
         if (_tibberPreisJetzt <= _start_charge && _batsoc < 100 && _dc_now < 1) {           // wir sind in der nacht
             let vergleichepvWh = pvwhToday;
             
-            //if (compareTime('00:00', null, ">", null)) {
             if (compareTime(_sundown, '00:00', 'between')) {
                 vergleichepvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
             } 
@@ -1139,7 +1130,7 @@ async function zeitDifferenzInStunden(zeit1, zeit2, nextDay) {
     let zeit2InMinuten = stunden2 * 60 + minuten2;
 
     // füge 24 Stunden zu Zeit 2 hinzu (Tagesübergang)
-    if (nextDay && _hhJetzt >= 0) {
+    if (nextDay) {
         zeit2InMinuten += 24 * 60;
     }
 

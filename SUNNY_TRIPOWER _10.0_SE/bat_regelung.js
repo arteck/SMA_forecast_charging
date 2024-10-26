@@ -15,7 +15,7 @@ const batterieLadenManuellStartDP   = userDataDP + '.strom.batterieLadenManuellS
 const pvUpdateDP                    = userDataDP + '.strom.pvforecast.lastUpdated';
 
 const momentan_VerbrauchDP          = userDataDP + '.strom.Momentan_Verbrauch';
-const pV_Leistung_aktuellDP         = userDataDP + '.strom.PV_Leistung_aktuell';
+const pv_Leistung_aktuellDP         = userDataDP + '.strom.PV_Leistung_aktuell';
 
 // debug
 let _debug = getState(tibberDP + 'debug').val == null ? false : getState(tibberDP + 'debug').val;
@@ -224,7 +224,7 @@ createUserStates(userDataDP, false, [strom.Momentan_Verbrauch', { 'name': 'Momen
     setState(momentan_VerbrauchDP, 0, true);
 });
 createUserStates(userDataDP, false, ['strom.PV_Leistung_aktuell', { 'name': 'PV_Leistung_aktuell dc1 + dc2', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
-    setState(pV_Leistung_aktuellDP, 0, true);
+    setState(pv_Leistung_aktuellDP, 0, true);
 });
 
 Zeile entfernen  */ 
@@ -270,7 +270,7 @@ async function processing() {
         dc_now_DP = aufrunden(2, dc_now_DP) /1000;  // in kW
     }
 
-    setState(pV_Leistung_aktuellDP, dc_now_DP, true);
+    setState(pv_Leistung_aktuellDP, dc_now_DP, true);
 
     // fülle den ertragsarray
     let pvfc                       = await getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
@@ -322,7 +322,7 @@ async function processing() {
         restladezeit        = 0
     }
 
-    let _toSundownhr     = 0;
+    let toSundownhr     = 0;
 
     setState(tibberDP + 'extra.BatterieRestladezeit', restladezeit, true);
 
@@ -386,12 +386,12 @@ async function processing() {
         setState(tibberDP + 'extra.Batterielaufzeit', getMinHours(batlefthrs), true);
 
         //wieviel wh kommen in etwa von PV in den nächsten 24h
-        let hrstorun        = 24;
+        let hrsToRun        = 24;
         let pvwhToday       = 0;
         let pvwhTomorrow    = 0;
 
         if (_pvforecastTodayArray.length > 0) {
-            for (let p = 0; p < hrstorun * 2; p++) {   // *2 weil 48 PV Datenpunkte
+            for (let p = 0; p < hrsToRun * 2; p++) {   // *2 weil 48 PV Datenpunkte
                 pvwhToday   = pvwhToday + _pvforecastTodayArray[p][2] / 2;
             }
         }
@@ -443,21 +443,20 @@ async function processing() {
                     }
                 }           
             }
-        }
-          
+        }          
 
-        hrstorun     = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));
-        _toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, false));
+        hrsToRun     = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));
+        toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, false));
 
         if (_debug) {
             console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup);
-            console.warn('bis nächster Sonnenaufgang hrstorun '  + hrstorun + ' bis nächster Untergang toSundownhr ' + _toSundownhr);
+            console.warn('bis nächster Sonnenaufgang hrsToRun '  + hrsToRun + ' bis nächster Untergang toSundownhr ' + toSundownhr);
         }        
 
         if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {  
             pvwhToday = 0;                                              // initialisiere damit die entladung läuft
             let t = 0;
-            if (_toSundownhr > 0) {                
+            if (toSundownhr > 0) {                
                 //wieviel kwh kommen in etwa von PV ab jetzt
                 for (t = 0; t < pvfc.length; t++) {                                 
                     pvwhToday = pvwhToday + pvfc[t][0];          
@@ -486,7 +485,7 @@ async function processing() {
 
         let curbatwh   = aufrunden(2, ((_batteryCapacity / 100) * _batsoc));     // batterie ladung 
 
-        if (batlefthrs < hrstorun) {
+        if (batlefthrs < hrsToRun) {
             for (let h = 0; h < tibberPoiAll.length; h++) {
                 if (tibberPoiAll[h][0] <= _start_charge) {
                     prclow.push(tibberPoiAll[h]);
@@ -503,7 +502,7 @@ async function processing() {
             //nachlademenge Wh nach höchstpreisen am Tag            
             let nachladeMengeWh = ((prchigh.length * ((_baseLoad + _klimaLoad) /2)) / _wr_efficiency);   // ich mag alles in klammern
             
-            if (hrstorun < 24 && !_snowmode) {
+            if (hrsToRun < 24 && !_snowmode) {
                 nachladeMengeWh = nachladeMengeWh - (pvwhToday * _wr_efficiency);
             }           
 
@@ -582,7 +581,7 @@ async function processing() {
         if (_dc_now < _verbrauchJetzt && !starteLadungTibber) {                            
             // wenn genug PV am Tag aber gerade nicht genug Sonne aber tibber klein genug
             if (_debug) {
-                console.info('pvwhToday ' + pvwhToday + ' benötigt werden ' + ((_baseLoad + _klimaLoad) * _toSundownhr * _wr_efficiency) + ' _dc_now ' + _dc_now);                
+                console.info('pvwhToday ' + pvwhToday + ' benötigt werden ' + ((_baseLoad + _klimaLoad) * toSundownhr * _wr_efficiency) + ' _dc_now ' + _dc_now);                
             }
             
             // Entladezeit wenn was im akku und preis hoch genug um zu sparen 
@@ -590,7 +589,7 @@ async function processing() {
                 _tibber_active_idx = 21;
             }
             
-            if (pvwhToday > ((_baseLoad + _klimaLoad) * _toSundownhr * _wr_efficiency) && _tibberPreisJetzt <= _stop_discharge && _dc_now < 1) {
+            if (pvwhToday > ((_baseLoad + _klimaLoad) * toSundownhr * _wr_efficiency) && _tibberPreisJetzt <= _stop_discharge && _dc_now < 1) {
                 if (!_nurEntladestunden) {
                     _tibber_active_idx = 20;          
                 }
@@ -613,7 +612,7 @@ async function processing() {
         entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
 
         if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
-            if (batlefthrs >= hrstorun) { 
+            if (batlefthrs >= hrsToRun) { 
                 if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                     if (_debug) {
                         console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
@@ -774,9 +773,9 @@ async function processing() {
             let toSundownhrReduziert = 0;          
 
             if (restlademenge > 0) {                   
-                toSundownhrReduziert = _toSundownhr;
-                if (_toSundownhr > _sundownReduzierung) {
-                    toSundownhrReduziert = _toSundownhr - _sundownReduzierung;
+                toSundownhrReduziert = toSundownhr;
+                if (toSundownhr > _sundownReduzierung) {
+                    toSundownhrReduziert = toSundownhr - _sundownReduzierung;
                 } 
 
                 _max_pwr = Math.max(Math.round(restlademenge / toSundownhrReduziert), 0);  

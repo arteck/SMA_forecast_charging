@@ -254,7 +254,7 @@ async function processing() {
 
     if (_tick >= 60) {         // alle 60 ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
         const commNow = await getStateAsync(spntComCheckDP);
-        setState(communicationRegisters.fedInSpntCom, commNow);                     // 40151_Kommunikation
+        setState(communicationRegisters.fedInSpntCom, commNow.val);                     // 40151_Kommunikation
         setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);        // schreibe irgendwas da rein.. 
         _tick = 0;
     }

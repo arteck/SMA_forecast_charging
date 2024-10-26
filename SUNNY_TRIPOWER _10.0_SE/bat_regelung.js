@@ -32,7 +32,7 @@ const _mindischrg               = -1;                                   // min e
 const _batteryLadePowerMax      = 5000;                                 // max Batterie ladung 
 const _lossfactor               = 0.75;                                 // System gesamtverlust in % (Lade+Entlade Effizienz)
 const _pwrAtCom_def             = _batteryLadePowerMax * (253 / 230);   // max power bei 253V = 5500 W
-const _sma_em                   = 'sma-em.0.3015242334';                // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
+const _sma_em                   = 'sma-em.0.xxxxxx';                    // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
 let   _batteryLadePower         = _batteryLadePowerMax;                 // Ladeleistung laufend der Batterie in W
 const _loadfact                 = 1 / _lossfactor;                      // 1,33
 let   _istLadezeit              = false;                                // ladezeit gefunden merker
@@ -63,7 +63,7 @@ let _start_charge               = 0.1881;                                       
 const _stop_discharge           = aufrunden(4, _start_charge * _loadfact);      // 0.19 * 1.33 = 0.2533 €
 
 // Fahrzeug mit berücksichtigen in Verbrauchsrechnung EVCC Adapter benötigt
-const _considerVehicle   = true;
+const _considerVehicle   = false;
 const _max_VehicleConsum = 4000;                                                // max Wert wenn Fahrzeug lädt
 const isVehicleConnDP   = 'evcc.0.loadpoint.1.status.connected';                // ist Fahrzeug gerade an der Ladeseule DP
 const vehicleConsumDP   = 'evcc.0.loadpoint.1.status.chargePower';              // angaben in W

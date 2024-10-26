@@ -17,10 +17,15 @@ const pvUpdateDP                    = userDataDP + '.strom.pvforecast.lastUpdate
 const momentan_VerbrauchDP          = userDataDP + '.strom.Momentan_Verbrauch';
 const pv_Leistung_aktuellDP         = userDataDP + '.strom.PV_Leistung_aktuell';
 
+const bydDirectSOCDP            = 'bydhvs.0.State.SOC';                 // battSOC netto direkt von der Batterie
+
 // debug
 let _debug = getState(tibberDP + 'debug').val == null ? false : getState(tibberDP + 'debug').val;
 
 //-------------------------------------------------------------------------------------
+const _InitCom_Aus              = 803;
+const _InitCom_An               = 802;
+
 const _pvPeak                   = 13170;                                // PV-Anlagenleistung in Wp
 const _batteryCapacity          = 12800;                                // Netto Batterie Kapazität in Wh BYD 2.56 pro Modul
 const _batteryTarget            = 100;                                  // Gewünschtes Ladeziel der Regelung (e.g., 85% for lead-acid, 100% for Li-Ion)
@@ -32,7 +37,7 @@ const _mindischrg               = -1;                                   // min e
 const _batteryLadePowerMax      = 5000;                                 // max Batterie ladung 
 const _lossfactor               = 0.75;                                 // System gesamtverlust in % (Lade+Entlade Effizienz)
 const _pwrAtCom_def             = _batteryLadePowerMax * (253 / 230);   // max power bei 253V = 5500 W
-const _sma_em                   = 'sma-em.0.xxxxxx';                    // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
+const _sma_em                   = 'sma-em.0.xxxxx';                     // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
 let   _batteryLadePower         = _batteryLadePowerMax;                 // Ladeleistung laufend der Batterie in W
 const _loadfact                 = 1 / _lossfactor;                      // 1,33
 let   _istLadezeit              = false;                                // ladezeit gefunden merker
@@ -40,10 +45,9 @@ let   _istEntladezeit           = false;                                // Entla
 let   _nurEntladestunden        = false;                                // nutze nur entladestuden 
 
 // manuelles reduzieren der PV um x Watt
-let _power50Reduzierung             = 0;                                    // manuelles reduzieren der pv prognose pro stunde bewölkt
-let _power90Reduzierung             = 0;                                    // manuelles reduzieren der pv prognose pro stunde ohne wolken
-let _sundownReduzierung             = 0;                                    // zum rechnen
-const _sundownReduzierungStunden    = 3;                                    // ladedauer verkürzen um x Stunden nach hinten
+let     _power50Reduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde bewölkt
+let     _power90Reduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde ohne wolken
+const   _sundownReduzierungStunden    = 3;                                    // ladedauer verkürzen um x Stunden nach hinten
 
 // Klimaanlagesteuerung dazu ist ein Wetteradapter notwendig der die Temperatur liefert
 // die ladezeit wird dann laut verbrauch berechnet
@@ -58,19 +62,21 @@ const   _reduzierungStundenKlima  = 2;                                          
 
 
 // tibber Preis Bereich
-let _snowmode                   = false;                                        // manuelles setzen des Schneemodus, dadurch wird in der Nachladeplanung die PV Prognose ignoriert, z.b. bei Schneebedeckten PV Modulen und der daraus resultierenden falschen Prognose
-let _start_charge               = 0.1881;                                       // Eigenverbrauchspreis
+let   _snowmode                 = false;                                        // manuelles setzen des Schneemodus, dadurch wird in der Nachladeplanung die PV Prognose ignoriert, z.b. bei Schneebedeckten PV Modulen und der daraus resultierenden falschen Prognose
+let   _start_charge             = 0.1881;                                       // Eigenverbrauchspreis
 const _stop_discharge           = aufrunden(4, _start_charge * _loadfact);      // 0.19 * 1.33 = 0.2533 €
 
 // Fahrzeug mit berücksichtigen in Verbrauchsrechnung EVCC Adapter benötigt
 const _considerVehicle   = false;
 const _max_VehicleConsum = 4000;                                                // max Wert wenn Fahrzeug lädt
-const isVehicleConnDP   = 'evcc.0.loadpoint.1.status.connected';                // ist Fahrzeug gerade an der Ladeseule DP
-const vehicleConsumDP   = 'evcc.0.loadpoint.1.status.chargePower';              // angaben in W
-const evccModusDP       = 'evcc.0.loadpoint.1.status.mode';                     // lademodus
+let   _isVehicleConn     = false;
+let   _vehicleConsum     = 0;
 
-let _isVehicleConn      = false;
-let _vehicleConsum      = 0;
+const isVehicleConnDP    = 'evcc.0.loadpoint.1.status.connected';                // ist Fahrzeug gerade an der Ladeseule DP
+const vehicleConsumDP    = 'evcc.0.loadpoint.1.status.chargePower';              // angaben in W
+const evccModusDP        = 'evcc.0.loadpoint.1.status.mode';                     // lademodus
+
+
 
 const communicationRegisters = {   
     fedInSpntCom: 'modbus.0.holdingRegisters.3.40151_Kommunikation',                  
@@ -92,15 +98,10 @@ const inputRegisters = {
 
 // ----------------------------- copy ab hier
 
-const bydDirectSOCDP            = 'bydhvs.0.State.SOC';                            // battSOC netto direkt von der Batterie
-
 let _dc_now                     = 0;  
 let _einspeisung                = 0;
 let _battOut                    = 0;
 let _battIn                     = 0;
-
-const _InitCom_Aus              = 803;
-const _InitCom_An               = 802;
 
 let _SpntCom                    = _InitCom_Aus;           //   802: aktiv (Act)    803: inaktiv (Ina)
 let _verbrauchJetzt             = 0;
@@ -300,6 +301,9 @@ async function processing() {
         }
     }
 
+    let toSundownhr                     = 0;
+    let sundownReduzierung              = _sundownReduzierungStunden;
+
     let batterieLadenUhrzeit            = getState(batterieLadenUhrzeitDP).val;
     let batterieLadenUhrzeitStart       = getState(batterieLadenUhrzeitStartDP).val;
     let battStatus                      = getState(inputRegisters.betriebszustandBatterie).val;
@@ -322,8 +326,6 @@ async function processing() {
         restladezeit        = 0
     }
 
-    let toSundownhr     = 0;
-
     setState(tibberDP + 'extra.BatterieRestladezeit', restladezeit, true);
 
     if (_debug) {
@@ -345,7 +347,7 @@ async function processing() {
     
     if (_dc_now > _verbrauchJetzt && _batsoc < 100) {
         _max_pwr    = (_dc_now - _verbrauchJetzt) * -1;   // vorbelegung zum laden     
-    } 
+    }     
 
     if (_tibberNutzenSteuerung) {  
         const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
@@ -362,14 +364,13 @@ async function processing() {
                
         //console.info('tibberPoilow ' +  JSON.stringify(tibberPoilow));    
 
-        _klimaLoad = 0;
-        _sundownReduzierung = _sundownReduzierungStunden;
+        _klimaLoad = 0;        
 
         if (_mitKlimaanlage) {
             _istKlimaAn = getState(_klimaDP).val;            
 
             if (_istKlimaAn > 0) {
-                _sundownReduzierung = _sundownReduzierungStunden + _reduzierungStundenKlima; // verkürze die ladedauer um x stunden     
+                sundownReduzierung = _sundownReduzierungStunden + _reduzierungStundenKlima; // verkürze die ladedauer um x stunden     
             }
 
             const tempWetter = getState(_wetterTemperaturDP).val;
@@ -766,7 +767,7 @@ async function processing() {
             console.info('Abschluss PV bis ' + latesttime);
             console.info('pvfc.length ' + pvfc.length + ' Restladezeit nach pvfc Ermittlung möglich ' + restladezeit);
         //    console.warn('pvfc ' + JSON.stringify(pvfc));
-            console.info('_sundownReduzierung um ' + _sundownReduzierung + ' Stunden');
+            console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');
         }        
    
         if (_batsoc < 100 && pvfc.length > 0) {    
@@ -774,8 +775,8 @@ async function processing() {
 
             if (restlademenge > 0) {                   
                 toSundownhrReduziert = toSundownhr;
-                if (toSundownhr > _sundownReduzierung) {
-                    toSundownhrReduziert = toSundownhr - _sundownReduzierung;
+                if (toSundownhr > sundownReduzierung) {
+                    toSundownhrReduziert = toSundownhr - sundownReduzierung;
                 } 
 
                 _max_pwr = Math.max(Math.round(restlademenge / toSundownhrReduziert), 0);  
@@ -976,7 +977,7 @@ async function vorVerarbeitung() {
     _hhJetzt                    = getHH();
     _today                      = new Date();
     _batsoc                     = Math.min(getState(inputRegisters.batSoC).val, 100);                   //batsoc = Batterieladestand vom WR
-    _bydDirectSOC               = Math.min(getState(bydDirectSOCDP).val, 100);                          // nimm den bydSoc da der WR nicht oft diesen übermittelt
+    _bydDirectSOC               = Math.min(getState(bydDirectSOCDP).val, 100);                          // nimm den BatterieSOC da der WR nicht oft diesen übermittelt
     _debug                      = getState(tibberDP + 'debug').val;
 
     _snowmode                   = getState(tibberDP + 'extra.PV_Schneebedeckt').val;

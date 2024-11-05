@@ -27,35 +27,40 @@ createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPreisNächsteStun
 }); 
 
 holePreis();
-
 aktualisiereStunde();
 
 function holePreis() {
     let preise = [];
     let preisePV = [];
-
-    const now = new Date();
-    const array24Stunden = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     
     const arr1 = JSON.parse(getState(_tibber +'PricesToday.json').val);
     const arr2 = JSON.parse(getState(_tibber +'PricesTomorrow.json').val);
     let arrPrice = arr1;
 
-    if (arr2) {
-        arrPrice = arr1.concat(arr2);  // füge beide zusammen
-    } 
+    let now = new Date();
+
+    if (arr2.length > 0) {
+        now.setMinutes(0, 0, 0);
+        const heutePreise = arrPrice.filter(price => new Date(price.startsAt) >= now);
+        arrPrice = heutePreise.concat(arr2);           // füge beide zusammen
+       
+    } else {
+        now.setHours(0, 0, 0, 0);
+    }
+    
+    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     for (let i = 0; i < arrPrice.length; i++) {
         const element   = arrPrice[i];
         const startsAt  = element.startsAt;
-        const start = new Date(startsAt);
+        const start     = new Date(startsAt);
         const preis     = element.total;
         const levelText = element.level;
 
         let obj = {};
-
-        if (start >= now && start <= array24Stunden) {
-            // console.warn(`Starts at: ${start}, Total: ${preis}, level: ${levelText}`);
+            
+        if (start >= now && start < next24Hours) {        
+         //    console.warn(`Starts at: ${start}, Total: ${preis}, level: ${levelText}`);
             const stateBaseName = _tibberDP2 + i + ".";
                     
             const end = new Date(Date.parse(startsAt)).getTime()+3600000;            
@@ -188,12 +193,10 @@ function aktualisiereStunde() {
     setState(_tibberDP + 'extra.tibberPreisNächsteStunde' , getState(_tibberDP + stunde + '.price'/*Preis*/).val, true);
 }
 
-schedule('*/60 * * * *', function() {
+schedule('0 * * * *', function() {
     holePreis();     
 });
 
 schedule('1 * * * *', function() {
     aktualisiereStunde();
 });
- 
-

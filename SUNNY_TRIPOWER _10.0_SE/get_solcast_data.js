@@ -5,13 +5,12 @@ const options = { hour12: false, hour: '2-digit', minute: '2-digit' };
 
 const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, es werden summen Dp's angelegt   <<<<<<<<-----------------------------------  wichtig
 
-const seite1 = "xxxx-xxxx-xxxx-xxxx";
-const seite2 = "yyyy-yyyy-yyyy-yyyy";
-const key_id = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-const name1 = 'garten';         // name dp1  frei wählbar  
-const name2 = 'strasse';        // name dp2  frei wählbar
-const gesamt = 'gesamt';        // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
-
+const seite1Key = "xxxx-xxxx-xxxx-xxxx";
+const seite2Key = "yyyy-yyyy-yyyy-yyyy";
+const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+const seite1    = 'garten';         // name dp1  frei wählbar  
+const seite2    = 'strasse';        // name dp2  frei wählbar
+const gesamt    = 'gesamt';        // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
 
 const _influxDb                     = true;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
 const  influxInstance               = 'influxdb.0';
@@ -31,7 +30,6 @@ const abbrechenBei          = '00:00';   // ab wieviel Uhr kommt nix mehr, kann 
 // pv_estimate90 – Der Optimist: Im Gegensatz zum pv_estimate10 zeigt uns der pv_estimate90 die sonnige Seite. Dieser Wert ist die 90. Perzentile – eine Art Best-Case-Szenario. Hier sagen die Daten, dass es nur eine 10 %ige Chance gibt, dass die Leistung diesen Wert überschreitet. Ideal, wenn du die Dinge gerne von der besten Seite betrachtest.​
 let prognose1      = 1;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
 let prognose2      = 0;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
-
 
 //-------------------------------------------------------------
 

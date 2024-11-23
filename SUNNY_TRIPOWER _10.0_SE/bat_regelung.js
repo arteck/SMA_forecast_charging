@@ -8,6 +8,7 @@ const tomorrow_kWDP         = userDataDP + '.strom.pvforecast.tomorrow.gesamt.to
 const tibberPreisJetztDP    = tibberDP + 'extra.tibberPreisJetzt';
 const tibberPvForcastDP     = tibberDP + 'extra.tibberPvForcast';
 
+
 const batterieLadenUhrzeitDP        = userDataDP + '.strom.batterieLadenUhrzeit';
 const batterieLadenUhrzeitStartDP   = userDataDP + '.strom.batterieLadenUhrzeitStart';
 const batterieLadenManuellStartDP   = userDataDP + '.strom.batterieLadenManuellStart';
@@ -17,7 +18,7 @@ const pvUpdateDP                    = userDataDP + '.strom.pvforecast.lastUpdate
 const momentan_VerbrauchDP          = userDataDP + '.strom.Momentan_Verbrauch';
 const pv_Leistung_aktuellDP         = userDataDP + '.strom.PV_Leistung_aktuell';
 
-const bydDirectSOCDP            = 'bydhvs.0.State.SOC';                 // battSOC netto direkt von der Batterie
+const bydDirectSOCDP                = 'bydhvs.0.State.SOC';                 // battSOC netto direkt von der Batterie
 
 // debug
 let _debug = getState(tibberDP + 'debug').val == null ? false : getState(tibberDP + 'debug').val;
@@ -33,11 +34,12 @@ const _lastPercentageLoadWith   = -500;                                 // letzt
 const _baseLoad                 = 850;                                  // Grundverbrauch in Watt
 const _wr_efficiency            = 0.93;                                 // Batterie- und WR-Effizienz (e.g., 0.9 for Li-Ion, 0.8 for PB)
 const _batteryPowerEmergency    = -4000;                                // Ladeleistung der Batterie in W notladung
+const _bydSOCEmergency          = 6;                                    // Notladung anstossen bei SOC kleiner als
 const _mindischrg               = -1;                                   // min entlade W entweder 0 oder -1
 const _batteryLadePowerMax      = 5000;                                 // max Batterie ladung 
 const _lossfactor               = 0.75;                                 // System gesamtverlust in % (Lade+Entlade Effizienz)
 const _pwrAtCom_def             = _batteryLadePowerMax * (253 / 230);   // max power bei 253V = 5500 W
-const _sma_em                   = 'sma-em.0.xxxxx';                     // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
+const _sma_em                   = 'sma-em.0.3015242334';                // Name der SMA EnergyMeter/HM2 Instanz bei installierten SAM-EM Adapter, leer lassen wenn nicht vorhanden
 let   _batteryLadePower         = _batteryLadePowerMax;                 // Ladeleistung laufend der Batterie in W
 const _loadfact                 = 1 / _lossfactor;                      // 1,33
 let   _istLadezeit              = false;                                // ladezeit gefunden merker
@@ -45,18 +47,18 @@ let   _istEntladezeit           = false;                                // Entla
 let   _nurEntladestunden        = false;                                // nutze nur entladestuden 
 
 // manuelles reduzieren der PV um x Watt
-let     _power50Reduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde bewölkt
-let     _power90Reduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde ohne wolken
-const   _sundownReduzierungStunden    = 3;                                    // ladedauer verkürzen um x Stunden nach hinten
+let     _powerReduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde bewölkt
+let     _power90Reduzierung         = 0;                                    // manuelles reduzieren der pv prognose pro stunde ohne wolken
+const   _sundownReduzierungStunden  = 0;                                    // ladedauer verkürzen um x Stunden nach hinten
 
 // Klimaanlagesteuerung dazu ist ein Wetteradapter notwendig der die Temperatur liefert
 // die ladezeit wird dann laut verbrauch berechnet
-const   _mitKlimaanlage           = false;                                             // soll die Klimaanlage berücksichtig werden
+const   _mitKlimaanlage           = false;                                            // soll die Klimaanlage berücksichtig werden
 const   _wetterTemperaturDP       = 'openweathermap.0.forecast.day0.temperatureMax';  // beispiel hier openweathermap
 const   _klimaVerbrauch           = 1500;                                             // manuell ermitteltes Wert wie viel Watt die Klimaanlage zieht 
 let     _klimaLoad                = 0;                                                // manuell ermitteltes Wert wie viel Watt die Klimaanlage zieht 
 const   _tempWetterSoll           = 23;                                               // referenz Wert ab da soll die klima mit berücksichtig werden
-const   _klimaDP                  = 'esphome.0.xxxx.mode'; // DP der klimaanlage zum check ob diese läuft
+const   _klimaDP                  = 'esphome.0.C4D8D50BCE6E.Climate.3365136539.mode';                            // DP der klimaanlage zum check ob diese läuft
 let     _istKlimaAn               = 0;                                                // läuft die klima bei mir 0 = aus
 const   _reduzierungStundenKlima  = 2;                                                // ladedauer verkürzen um x Stunden nach hinten wenn klima an 
 
@@ -67,7 +69,7 @@ let   _start_charge             = 0.1881;                                       
 const _stop_discharge           = aufrunden(4, _start_charge * _loadfact);      // 0.19 * 1.33 = 0.2533 €
 
 // Fahrzeug mit berücksichtigen in Verbrauchsrechnung EVCC Adapter benötigt
-const _considerVehicle   = false;
+const _considerVehicle   = true;
 const _max_VehicleConsum = 4000;                                                // max Wert wenn Fahrzeug lädt
 let   _isVehicleConn     = false;
 let   _vehicleConsum     = 0;
@@ -261,22 +263,8 @@ async function processing() {
  
     _bydDirectSOCMrk = 0;
 
-    if (_dc_now < 5) {              // alles was unter 5 W kann weg
-        _dc_now = 0;
-    }
-
-    let dc_now_DP     = _dc_now;
-
-    if (dc_now_DP > 0) {    
-        dc_now_DP = aufrunden(2, dc_now_DP) /1000;  // in kW
-    }
-
-    setState(pv_Leistung_aktuellDP, dc_now_DP, true);
-
     // fülle den ertragsarray
     let pvfc                       = await getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
-    
-    setState(tibberDP + 'extra.pvLadeZeitenArray', pvfc, true);
 
     let pvBis = '--:--';
     if (pvfc.length > 0) {            
@@ -369,8 +357,8 @@ async function processing() {
         if (_mitKlimaanlage) {
             _istKlimaAn = getState(_klimaDP).val;            
 
-            if (_istKlimaAn > 0) {
-                sundownReduzierung = _sundownReduzierungStunden + _reduzierungStundenKlima; // verkürze die ladedauer um x stunden     
+            if (_istKlimaAn > 0 && _reduzierungStundenKlima > _sundownReduzierungStunden) {  // soll klima berückstichtigt werden dann nimm diese
+                sundownReduzierung = _reduzierungStundenKlima;                            
             }
 
             const tempWetter = getState(_wetterTemperaturDP).val;
@@ -752,7 +740,7 @@ async function processing() {
         _prognoseNutzenSteuerung = false;
     }    
 
-    if (_prognoseNutzenSteuerung && _dc_now > 0) {    // compareTime(_sunupTodayAstro, _sundownAstro, 'between')
+    if (_prognoseNutzenSteuerung && _dc_now > 0) {    
         if (_debug) {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
@@ -816,7 +804,7 @@ async function processing() {
 
                 if (_debug) {
                     console.warn('-->> Bingo ladezeit 2 ' + ' Fahrzeug zieht ' + _vehicleConsum);
-                    console.info('-->> _power50Reduzierung um ' + _power50Reduzierung + ' _power90Reduzierung um ' + _power90Reduzierung);
+                    console.info('-->> _powerReduzierung um ' + _powerReduzierung + ' _power90Reduzierung um ' + _power90Reduzierung);
                 }
                 
                 if (_dc_now < verbrauchJetztOhneAuto ) {                             // kann sein dass die prognose nicht stimmt und wir haben ladezeiten aber draussen regnets
@@ -959,23 +947,16 @@ schedule('0 0 * * *', function() {
 async function vorVerarbeitung() {
 
     // berechne Astrozeiten für später
+    _today              = new Date();
     const tomorrow      = new Date(_today.getFullYear(), _today.getMonth(), _today.getDate() + 1);  
     _sundownAstro       = getAstroDate('sunsetStart').getHours() + ':' + getAstroDate('sunsetStart').getMinutes().toString().padStart(2, '0');                           // untergang heute  
     _sunupTodayAstro    = getAstroDate('sunriseEnd').getHours() + ':' + getAstroDate('sunriseEnd').getMinutes().toString().padStart(2, '0');                             // aufgang heute
     _sunupAstro         = getAstroDate('sunriseEnd', tomorrow).getHours() + ':' + getAstroDate('sunriseEnd', tomorrow).getMinutes().toString().padStart(2, '0');         // aufgang nächster Tag
-                                                
-    if (compareTime(_sundownAstro, '00:00', 'between') || compareTime('00:00', _sunupAstro, 'between')) {     // nachts ist ehh nix los also kann 0 rein
-        _dc_now = 0;    
-    } else {
-        const dc1 = await getStateAsync(inputRegisters.dc1);
-        const dc2 = await getStateAsync(inputRegisters.dc2);
-        _dc_now   = dc1.val + dc2.val;                                                                  // pv vom Dach zusammen in W          
-    }
-    
-    _verbrauchJetzt             = await berechneVerbrauch(_dc_now);
+
+    _dc_now                     = await berechnePV();                        
+    _verbrauchJetzt             = await berechneVerbrauch();
 
     _hhJetzt                    = getHH();
-    _today                      = new Date();
     _batsoc                     = Math.min(getState(inputRegisters.batSoC).val, 100);                   //batsoc = Batterieladestand vom WR
     _bydDirectSOC               = Math.min(getState(bydDirectSOCDP).val, 100);                          // nimm den BatterieSOC da der WR nicht oft diesen übermittelt
     _debug                      = getState(tibberDP + 'debug').val;
@@ -1009,7 +990,7 @@ async function vorVerarbeitung() {
 
     if (_notLadung) {         
         _tibber_active_idx            = 88          // notladung mrk
-        sendToWR(_InitCom_An, _batteryPowerEmergency);
+        sendToWR(_InitCom_Aus, _batteryPowerEmergency);
     } else {
         await processing();             
     }
@@ -1021,7 +1002,7 @@ async function vorVerarbeitung() {
 
 
 async function notLadungCheck() {    
-    if (_bydDirectSOC < 5 && _dc_now < _verbrauchJetzt) {
+    if (_bydDirectSOC < _bydSOCEmergency) {
         if (_bydDirectSOC != _bydDirectSOCMrk) {
             console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
             toLog(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %', true);
@@ -1032,7 +1013,33 @@ async function notLadungCheck() {
     return false;
 }
 
-async function berechneVerbrauch(pvJetzt) {
+async function berechnePV() {
+    let pVJetzt = 0;
+
+    if (compareTime(_sundownAstro, '00:00', 'between') || compareTime('00:00', _sunupAstro, 'between')) {     // nachts ist ehh nix los also kann 0 rein
+        pVJetzt = 0;    
+    } else {
+        const dc1 = await getStateAsync(inputRegisters.dc1);
+        const dc2 = await getStateAsync(inputRegisters.dc2);
+        pVJetzt   = dc1.val + dc2.val;                                                                  // pv vom Dach zusammen in W          
+    }
+
+    if (pVJetzt < 5) {              // alles was unter 5 W kann weg
+        pVJetzt = 0;
+    }
+
+    let pVJetzt_out     = pVJetzt;
+
+    if (pVJetzt_out > 0) {    
+        pVJetzt_out = aufrunden(2, pVJetzt) /1000;  // in kW
+    }
+
+    setState(pv_Leistung_aktuellDP, pVJetzt_out, true);
+
+    return Number(pVJetzt);
+}
+
+async function berechneVerbrauch() {
     if (_sma_em.length > 0) {
         inputRegisters.powerOut = _sma_em + ".psurplus" /*aktuelle Einspeiseleistung am Netzanschlußpunkt, SMA-EM Adapter*/
     }
@@ -1062,7 +1069,8 @@ async function berechneVerbrauch(pvJetzt) {
         }
     }
 
-    const verbrauchJetzt   = (pvJetzt + _battOut + netzbezug.val) - (_einspeisung + _battIn);       // verbrauch in W , 100W reserve obendruaf _vehicleConsum nicht rein nehmen
+    const verbrauchJetzt   = (_dc_now + _battOut + netzbezug.val) - (_einspeisung + _battIn);       // verbrauch in W , 100W reserve obendruaf _vehicleConsum nicht rein nehmen
+    
     const verbrauchVis = (verbrauchJetzt - _vehicleConsum);
     setState(momentan_VerbrauchDP, aufrunden(2, verbrauchVis /1000), true);                                // für die darstellung können die 100 W wieder raus und fahrzeug auch
 
@@ -1218,17 +1226,20 @@ async function getPvErtrag() {
         for (let p = 0; p < 48; p++) { /* 48 = 24h a 30min Fenster*/
             const pvstarttime = _pvforecastTodayArray[p][0];
             const pvendtime   = _pvforecastTodayArray[p][1];               
-            const pvpower50   = _pvforecastTodayArray[p][2];
+            const pvpower     = _pvforecastTodayArray[p][2];
             const pvpower90   = _pvforecastTodayArray[p][3];
 
             if (pvpower90 > (_baseLoad + _klimaLoad)) {
                 const minutes = 30;
                 if (compareTime(pvendtime, null, '<=', null)) {
-                    pvfc.push([pvpower50, pvpower90, minutes, pvstarttime, pvendtime]);                
+                    pvfc.push([pvpower, pvpower90, minutes, pvstarttime, pvendtime]);                
                 }
             }
         }
     }
+  
+    setState(tibberDP + 'extra.pvLadeZeitenArray', pvfc, true);
+
     return pvfc;
 }
 
@@ -1238,14 +1249,14 @@ async function holePVDatenAb() {
     for (let p = 0; p < 48; p++) {   
         const startTime = await getStateAsync(pvforecastTodayDP + p + '.startTime');
         const endTime   = await getStateAsync(pvforecastTodayDP + p + '.endTime');
-        let power50     = getState(pvforecastTodayDP + p + '.power').val;
+        let power       = getState(pvforecastTodayDP + p + '.power').val;
         let power90     = getState(pvforecastTodayDP + p + '.power90').val;
 
         // manuelles reduzieren pv
-        power50 = Math.max((power50 - _power50Reduzierung), 0); 
+        power = Math.max((power - _powerReduzierung), 0); 
         power90 = Math.max((power90 - _power90Reduzierung), 0); 
 
-        pvforecastTodayArray.push([startTime.val,endTime.val,power50,power90]);
+        pvforecastTodayArray.push([startTime.val,endTime.val,power,power90]);
     }
 
     let  pvforecastTomorrowArray = [];
@@ -1253,10 +1264,10 @@ async function holePVDatenAb() {
     for (let p = 0; p < 48; p++) {   
         const startTime = await getStateAsync(pvforecastTomorrowDP + p + '.startTime');
         const endTime   = await getStateAsync(pvforecastTomorrowDP + p + '.endTime');
-        const power50   = getState(pvforecastTomorrowDP + p + '.power').val;
+        const power   = getState(pvforecastTomorrowDP + p + '.power').val;
         const power90   = getState(pvforecastTomorrowDP + p + '.power90').val;
       
-        pvforecastTomorrowArray.push([startTime.val,endTime.val,power50,power90]);
+        pvforecastTomorrowArray.push([startTime.val,endTime.val,power,power90]);
     }
 
     return {pvforecastTodayArray, pvforecastTomorrowArray};

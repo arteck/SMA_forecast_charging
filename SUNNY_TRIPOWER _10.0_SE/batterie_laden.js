@@ -13,14 +13,15 @@ setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
 setState('0_userdata.0.strom.batterieLadenManuellTicker', _ticker, true); 
 setState('0_userdata.0.strom.batterieLadenManuellStop', false, true); 
 
+
 schedule('* * * * *', function () {
     const battProz                  = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val;        
           _battLaden                = getState('0_userdata.0.strom.batterieLadenManuellStart').val;
     const tibberNutzenManuell       = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell').val;
     const tibberStartStunde         = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuellHH').val;
     const battProzBis               = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuellProzent').val;
-
-    const aktuelleStunde = getHH();  
+    const battMaxLaden              = getState('0_userdata.0.strom.batterieLadenManuellForceWatt').val;
+    const aktuelleStunde            = getHH();  
 
 // prio 1 dann kommt automatisiert
 // nach tibber manuell uhrzeit aus der tabelle
@@ -42,9 +43,13 @@ schedule('* * * * *', function () {
             setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', false, true); 
         }                   
 
-        if (_ticker > _tickerVorgabe) {                
+        if (_ticker > _tickerVorgabe && battMaxLaden != -1) {                
             processingOff();                    
         }     
+
+        if (battMaxLaden != -1) {
+            _ticker = 999;    
+        }
     }
     
     setState('0_userdata.0.strom.batterieLadenManuellTicker', _tickerVorgabe - _ticker, true);   
@@ -56,7 +61,7 @@ schedule('* * * * *', function () {
 on({id: _triggerDP, change: 'ne'}, function() {  // aktualisiere laut adapter abfrageintervall   
     setTimeout(function () {  
         processingLaden(); 
-    }, 600);           // verzögerung zwecks Datenabholung           
+    }, 600);           // verzÃ¶gerung zwecks Datenabholung           
 });  
 
 on({id: '0_userdata.0.strom.batterieLadenManuellStop',change: 'any'}, function(obj) {  
@@ -114,7 +119,6 @@ function processingLaden() {
     }
 
     setState('0_userdata.0.strom.batterieLadenManuellWert', ladenMax, true);
-
 }
 
 
@@ -147,4 +151,3 @@ function ladungStop() {
     setState('modbus.0.holdingRegisters.3.40151_Kommunikation', 803);   // 802 active, 803 inactive
     setState(_spntComCheckDP, 803, true);
 }
-

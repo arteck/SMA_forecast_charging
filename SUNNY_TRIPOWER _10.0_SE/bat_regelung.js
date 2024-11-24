@@ -593,37 +593,39 @@ async function processing() {
             }  
         }
 
-            //       console.warn(JSON.stringify(_entladeZeitenArray));
+         //      console.warn(JSON.stringify(_entladeZeitenArray));
       
         // sortiere 
-        const entladeZeitenArrayAll     = await sortHourToSunup(await sortArrayByCurrentHour(_entladeZeitenArray, true, _hhJetzt), _sunup);
-        _entladeZeitenArray             = entladeZeitenArrayAll.arrOut; 
-        entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
+        if (_entladeZeitenArray.length > 0) {
+            const entladeZeitenArrayAll     = await sortHourToSunup(await sortArrayByCurrentHour(_entladeZeitenArray, true, _hhJetzt), _sunup);
+            _entladeZeitenArray             = entladeZeitenArrayAll.arrOut; 
+            entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
 
-        if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
-            if (batlefthrs >= hrsToRun) { 
-                if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
-                    if (_debug) {
-                        console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
+            if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
+                if (batlefthrs >= hrsToRun) { 
+                    if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {                                // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                        if (_debug) {
+                            console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
+                        }
+                        _istEntladezeit = true;
+                        _tibber_active_idx = 22;
+                        _entladeZeitenArray = [];
+                        entladeZeitenArrayVis = [];
+                        entladeZeitenArrayVis.push([0.0,"99:99","--:--"]);  //  initialisiere für Vis
                     }
-                    _istEntladezeit = true;
-                    _tibber_active_idx = 22;
-                    _entladeZeitenArray = [];
-                    entladeZeitenArrayVis = [];
-                    entladeZeitenArrayVis.push([0.0,"99:99","--:--"]);  //  initialisiere für Vis
-                }
-            } else {
-                if (_entladeZeitenArray.length > 0) {  
-                    await entladezeitEntscheidung();
                 } else {
-                    _tibber_active_idx = 23; 
-                    _entladeZeitenArray = [];
-                    entladeZeitenArrayVis = [];
-                    entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis                       
-                }                                                             
+                    if (_entladeZeitenArray.length > 0) {  
+                        await entladezeitEntscheidung();
+                    } else {
+                        _tibber_active_idx = 23; 
+                        _entladeZeitenArray = [];
+                        entladeZeitenArrayVis = [];
+                        entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis                       
+                    }                                                             
+                }
             }
         }
-
+        
         setState(tibberDP + 'extra.entladeZeitenArray', entladeZeitenArrayVis,  true); 
 
         // in der nacht starten setzen
@@ -873,11 +875,9 @@ async function processing() {
     if (_batsoc > 90 && _battIn > 0) {  
         _max_pwr = _lastPercentageLoadWith;
 
- //       if (_dc_now > _verbrauchJetzt + (_lastPercentageLoadWith * -1) + 200) {    // 200W reserve           
-            if (_debug) {
-                console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
-            }
-//        }          
+        if (_debug) {
+            console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
+        }       
     }      
 
     _maxchrg = _max_pwr;    
@@ -1395,4 +1395,3 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
-

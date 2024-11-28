@@ -26,6 +26,9 @@ createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPreisNächsteStun
 }); 
 
 
+// bei jeder preisänderung wird die neue Stunde mit dem niedrigen Preis für die vis übernommen
+const tibberPreisUebermnehmen = true;
+
 holePreis();
 
 
@@ -161,8 +164,10 @@ function startZeit(preiseKurz) {
 
     preiseKurz.splice(0, 1);
 
-    setState(_tibberDP + 'extra.tibberNutzenManuellHH', start, true);
-    setState(_tibberDP + 'extra.tibberBestPreis', preis, true);
+    if (tibberPreisUebermnehmen) {
+        setState(_tibberDP + 'extra.tibberNutzenManuellHH', start, true);
+        setState(_tibberDP + 'extra.tibberBestPreis', preis, true);
+    }
 }
 
 
@@ -180,7 +185,6 @@ function setPreisDP(gegebenesDatum, preis) {
         setState(_tibberDP + 'extra.tibberPreisNächsteStunde' , preis, true);
     }
 }
-
 
 on({id: [
   _tibber +'PricesToday.lastUpdate',

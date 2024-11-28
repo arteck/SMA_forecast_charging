@@ -181,7 +181,10 @@ function setPreisDP(gegebenesDatum, preis) {
     }
 }
 
-schedule('0 * * * *', function() {
+
+on({id: [
+  _tibber +'PricesToday.lastUpdate',
+  _tibber +'PricesTomorrow.lastUpdate',
+], change: 'ne'}, function () {
     holePreis();     
 });
-

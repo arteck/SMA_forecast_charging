@@ -179,7 +179,7 @@ function preisJetzt() {
         hh = 0;
     }
     
-    preis = getState('tibberlink.0.Homes.6078bdce-f8bf-4bed-8566-60466de136f2.PricesToday.' + hh + '.total').val;
+    preis = getState(_tibber + 'PricesToday.' + hh + '.total').val;
     setState(_tibberDP + 'extra.tibberPreisNächsteStunde', preis, true);
 }
 

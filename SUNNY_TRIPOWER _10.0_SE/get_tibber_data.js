@@ -30,6 +30,7 @@ createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPreisNächsteStun
 const tibberPreisUebermnehmen = true;
 
 holePreis();
+preisJetzt();
 
 
 function holePreis() {
@@ -73,9 +74,7 @@ function holePreis() {
             preise.push(obj);
 
             preisePV.push([preis, startTime , hhStartTime + ':30']);
-            preisePV.push([preis, hhStartTime + ':30', endTime]);
-            
-            setPreisDP(startsAt, preis);        
+            preisePV.push([preis, hhStartTime + ':30', endTime]);            
         }
 
         if (start > next24Hours) { 
@@ -96,7 +95,6 @@ function holePreis() {
     setState(_tibberDP + 'extra.tibberPvForcastTomorrow', preisePVTommorow, true);
 
     errechneBesteUhrzeit(preise);
-    
 }
 
 function sortArrayByStartTime(array, currentHour) {
@@ -170,21 +168,24 @@ function startZeit(preiseKurz) {
     }
 }
 
-
-function setPreisDP(gegebenesDatum, preis) {
+function preisJetzt() {
+    let hh = Number(getHH());
+    let preis = getState('tibberlink.0.Homes.6078bdce-f8bf-4bed-8566-60466de136f2.PricesToday.' + hh + '.total').val;
     
-    const gegebeneStunde = new Date(gegebenesDatum).getHours();
-    const aktuelleStunde = new Date().getHours();
-    const naechsteStunde = (aktuelleStunde + 1) % 24;
+    setState(_tibberDP + 'extra.tibberPreisJetzt', preis, true);
 
-    if (gegebeneStunde == aktuelleStunde) {
-        setState(_tibberDP + 'extra.tibberPreisJetzt' , preis, true);
+    hh = hh + 1;
+    if (hh > 23) {
+        hh = 0;
     }
-
-    if (gegebeneStunde == naechsteStunde) {
-        setState(_tibberDP + 'extra.tibberPreisNächsteStunde' , preis, true);
-    }
+    
+    preis = getState('tibberlink.0.Homes.6078bdce-f8bf-4bed-8566-60466de136f2.PricesToday.' + hh + '.total').val;
+    setState(_tibberDP + 'extra.tibberPreisNächsteStunde', preis, true);
 }
+
+schedule('0 * * * *', function () {
+    preisJetzt();
+});
 
 on({id: [
   _tibber +'PricesToday.lastUpdate',

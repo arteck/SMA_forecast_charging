@@ -170,7 +170,7 @@ function startZeit(preiseKurz) {
 
 function preisJetzt() {
     let hh = Number(getHH());
-    let preis = getState('tibberlink.0.Homes.6078bdce-f8bf-4bed-8566-60466de136f2.PricesToday.' + hh + '.total').val;
+    let preis = getState(_tibber + 'PricesToday.' + hh + '.total').val;
     
     setState(_tibberDP + 'extra.tibberPreisJetzt', preis, true);
 

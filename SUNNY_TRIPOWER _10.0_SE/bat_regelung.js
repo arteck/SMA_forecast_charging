@@ -255,7 +255,7 @@ async function processing() {
 
     _tick ++;
 
-    if (_tick >= 60) {         // alle 60 ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
+    if (_tick >= 60 && !_batterieLadenUebersteuernManuell) {       // alle 60 ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
         const commNow = await getStateAsync(spntComCheckDP);
         setState(communicationRegisters.fedInSpntCom, commNow.val);                     // 40151_Kommunikation
         setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);        // schreibe irgendwas da rein.. 
@@ -279,11 +279,7 @@ async function processing() {
 
     for (let h = 0; h < pvfc.length; h++) {                         // pvfc ist sortiert nach uhrzeit
         if (compareTime(pvfc[h][3], pvfc[h][4], 'between')) {
-        //    _ladezeitVon = pvfc[h][3];            
-        //    _ladezeitBis = pvfc[h][4];
-
             _istLadezeit = true;
-
             if (_debug) {
                 console.warn('-->> Bingo ladezeit ');
             }
@@ -423,7 +419,7 @@ async function processing() {
                     }
                 }
             }
-            
+
             if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
                 for (let su = 0; su < 48; su++) {
                     if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {  
@@ -542,7 +538,7 @@ async function processing() {
                             tibberPoilow.push(prclow[i]);                            
                             // aus der nachladung starten setzen
                             starteLadungTibber = true;
-                            _tibber_active_idx = 1;
+                            _tibber_active_idx = 1;        // wird nicht gebraucht da im _tibber_active_idx = 5 aufgeht später
 
                             if (_debug) {
                                 console.warn('-->> Bingo nachladezeit');
@@ -557,6 +553,15 @@ async function processing() {
 
         _entladeZeitenArray         = [];      
         let entladeZeitenArrayVis   = [];    
+
+
+        if (pvfc.length < 1) { // wenn garkeine ladezeiten vorhanden wie im winter
+            _sunup = '14:00';    
+            if (_debug) {
+                console.error('keine ladestunden ermittelt sunup : ' + _sunup);
+            }
+        }
+
         let tibberPoihigh           = await filterZeit14UhrOrSunup(tibberPoiAll, _sunup);    // sortiert nach preis und stunden grösser jetzt und bis zu sunup oder 14 uhr
         let lefthrs                 = Math.ceil(batlefthrs *2);                         // Batterielaufzeit laut SOC muss doppelt gerechnet werden da 30 min für tibber abgleich
 
@@ -580,14 +585,12 @@ async function processing() {
             }
             
             // Entladezeit wenn was im akku und preis hoch genug um zu sparen 
-            if (batlefthrs > 0 && _tibberPreisJetzt > _stop_discharge  && _dc_now > 0 && !_nurEntladestunden) {               
+            if (!_nurEntladestunden && batlefthrs > 0 && _tibberPreisJetzt > _stop_discharge  && _dc_now > 0) {               
                 _tibber_active_idx = 21;
             }
             
-            if (pvwhToday > ((_baseLoad + _klimaLoad) * toSundownhr * _wr_efficiency) && _tibberPreisJetzt <= _stop_discharge && _dc_now < 1) {
-                if (!_nurEntladestunden) {
-                    _tibber_active_idx = 20;          
-                }
+            if (!_nurEntladestunden && pvwhToday > ((_baseLoad + _klimaLoad) * toSundownhr * _wr_efficiency) && _tibberPreisJetzt <= _stop_discharge && _dc_now < 1) {
+                _tibber_active_idx = 20;          
             } 
         }          
 
@@ -599,7 +602,7 @@ async function processing() {
             }  
         }
 
-            //   console.warn(JSON.stringify(_entladeZeitenArray));
+         // console.warn(JSON.stringify(_entladeZeitenArray));
       
         // sortiere 
         if (_entladeZeitenArray.length > 0) {
@@ -608,9 +611,9 @@ async function processing() {
             entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH; 
 
             if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
-                if (pvWh < (_baseLoad + _klimaLoad) * 24 * _wr_efficiency) {                        // bekomme ich batterie aufgeladen  
-                    if (batlefthrs >= hrsToRun) { 
-                        if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {        // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                if (pvfc.length > 0) {                        // bekomme ich batterie aufgeladen  
+                    if (batlefthrs >= hrsToRun) {                     
+                       if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {        // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                             if (_debug) {
                                 console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
                             }
@@ -619,18 +622,15 @@ async function processing() {
                             _entladeZeitenArray = [];
                             entladeZeitenArrayVis = [];
                             entladeZeitenArrayVis.push([0.0,"99:99","--:--"]);  //  initialisiere für Vis
-                        }
-                    } else {
-                        if (_entladeZeitenArray.length > 0) {  
-                            await entladezeitEntscheidung();
-                        } else {
-                            _tibber_active_idx = 23; 
-                            _entladeZeitenArray = [];
-                            entladeZeitenArrayVis = [];
-                            entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis                       
-                        }                                                             
+                        }   
                     }
                 }
+
+                await entladezeitEntscheidung();
+                if (_tibber_active_idx == 23) {              
+                    entladeZeitenArrayVis = [];    
+                    entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis     
+                };
             }
         }
         
@@ -647,23 +647,17 @@ async function processing() {
             }
         }
 
+        tibberPoilow                = await doppelteRausAusArray(tibberPoilow);
+        const ladeZeitenArrayTmp    = ladeZeitenArray.concat(tibberPoilow);      // füge die 2 arrays zusammen            
+        ladeZeitenArray             = await sortArrayByCurrentHour(ladeZeitenArrayTmp, false, '00');      
+
         // starte die ladung
         if (starteLadungTibber) {
             if (restladezeit == 0) {
                 if (_battIn > 0) {
                     restladezeit = aufrunden(2, (restlademenge / _battIn * _wr_efficiency));
                 } 
-            }                   
-
-            tibberPoilow = await doppelteRausAusArray(tibberPoilow);
-
-            if (_debug) {
-                console.error('restladezeit : ' + restladezeit + ' tibberPoilow.length ' + tibberPoilow.length / 2);
-            }
-
-            const ladeZeitenArrayTmp = ladeZeitenArray.concat(tibberPoilow);      // füge die 2 arrays zusammen
-                
-            ladeZeitenArray = await sortArrayByCurrentHour(ladeZeitenArrayTmp, false, '00');      
+            }                             
 
             for (let i = 0; i < ladeZeitenArray.length; i++) {                    
                 if (compareTime(ladeZeitenArray[i][1], ladeZeitenArray[i][2], 'between')) {           
@@ -679,7 +673,7 @@ async function processing() {
         setState(tibberDP + 'extra.ladeZeitenArray', ladeZeitenArray, true);
 
         if (_debug) {
-            console.info('entladeZeitenArray ' + _entladeZeitenArray.length + ' ladeZeitenArray ' + ladeZeitenArray.length);
+            console.info('restladezeit : ' + restladezeit + '_entladeZeitenArray ' + _entladeZeitenArray.length + ' ladeZeitenArray ' + ladeZeitenArray.length);
          //   console.info('ladeZeitenArray ' + JSON.stringify(ladeZeitenArray));
         }
 
@@ -895,19 +889,25 @@ async function processing() {
 async function sendToWR(commWR, pwrAtCom) {
     const commNow = await getStateAsync(spntComCheckDP);
 
-    if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom) && !_batterieLadenUebersteuernManuell) {
-        if (_debug) {
-            console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
-        }
-        setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);       // 40149_Wirkleistungvorgabe
-        setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
-        setState(spntComCheckDP, commWR, true);                         // check DP für vis        
-        setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
+    if (_debug) {
+            console.error('_batterieLadenUebersteuernManuell ' + _batterieLadenUebersteuernManuell);
     }
 
-    if (_debug && !_batterieLadenUebersteuernManuell) {
-        console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom);
-        console.info('----------------------------------------------------------------------------------');
+    if (!_batterieLadenUebersteuernManuell) {
+        if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom)) {
+            if (_debug) {
+                console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
+            }
+            setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);       // 40149_Wirkleistungvorgabe
+            setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
+            setState(spntComCheckDP, commWR, true);                         // check DP für vis        
+            setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
+        }
+
+        if (_debug && !_batterieLadenUebersteuernManuell) {
+            console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom);
+            console.info('----------------------------------------------------------------------------------');
+        }
     }
 
     _lastSpntCom    = commWR;
@@ -980,6 +980,7 @@ async function vorVerarbeitung() {
         _tibberNutzenSteuerung      = false;    // der steuert intern ob lauf gültig  für tibber laden/entladen
         _prognoseNutzenSteuerung    = false;    // der steuert intern ob lauf gültig  für pv laden
         _lastSpntCom                = 98;       // manuelles laden
+        _tick = 0;
     }
 
     if (_debug) {
@@ -1098,6 +1099,7 @@ async function entladezeitEntscheidung() {
             }
         }
     } else {
+        _tibber_active_idx = 23;
         _entladeZeitenArray = [];
         _istEntladezeit = true;
     }
@@ -1111,7 +1113,7 @@ async function filterZeit14UhrOrSunup(arrZeit, sunup) {
     for (let i = 0; i < arrZeit.length; i++) {
         const startTime = parseInt(arrZeit[i][1].split(':')[0]);
         newArray.push(arrZeit[i]);
-        if (startTime == sunup.split(':')[0]) { // || startTime == 14
+        if (startTime == sunup.split(':')[0]) { 
             break;    
         }
     }
@@ -1225,16 +1227,16 @@ async function getPvErtrag() {
     let pvfc = [];
     
     if (_pvforecastTodayArray.length > 0) {
-        for (let p = 0; p < 48; p++) { /* 48 = 24h a 30min Fenster*/
-            const pvstarttime = _pvforecastTodayArray[p][0];
-            const pvendtime   = _pvforecastTodayArray[p][1];               
-            const pvpower     = _pvforecastTodayArray[p][2];
-            const pvpower90   = _pvforecastTodayArray[p][3];
+        for (let p = 0; p < 48; p++) {                      /* 48 = 24h a 30min Fenster*/
+            const pvstarttime   = _pvforecastTodayArray[p][0];
+            const pvendtime     = _pvforecastTodayArray[p][1];               
+            const wert1         = _pvforecastTodayArray[p][2];
+            const wert2         = _pvforecastTodayArray[p][3];
 
-            if (pvpower90 > (_baseLoad + _klimaLoad)) {
+            if (wert1 > (_baseLoad + _klimaLoad) || wert2 > (_baseLoad + _klimaLoad)) {
                 const minutes = 30;
                 if (compareTime(pvendtime, null, '<=', null)) {
-                    pvfc.push([pvpower, pvpower90, minutes, pvstarttime, pvendtime]);                
+                    pvfc.push([wert1, wert2, minutes, pvstarttime, pvendtime]);                
                 }
             }
         }

@@ -288,7 +288,6 @@ async function processing() {
 
     let toSundownhr                     = 0;
     let sundownReduzierung              = _sundownReduzierungStunden;
-
     let batterieLadenUhrzeit            = getState(batterieLadenUhrzeitDP).val;
     let batterieLadenUhrzeitStart       = getState(batterieLadenUhrzeitStartDP).val;
     let battStatus                      = getState(inputRegisters.betriebszustandBatterie).val;
@@ -555,7 +554,7 @@ async function processing() {
         let entladeZeitenArrayVis   = [];    
 
 
-        if (pvfc.length < 1) { // wenn garkeine ladezeiten vorhanden wie im winter
+        if (pvfc.length < 1 && _hhJetzt <= 14) { // wenn garkeine ladezeiten vorhanden wie im winter
             _sunup = '14:00';    
             if (_debug) {
                 console.error('keine ladestunden ermittelt sunup : ' + _sunup);
@@ -613,7 +612,7 @@ async function processing() {
             if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) { 
                 if (pvfc.length > 0) {                        // bekomme ich batterie aufgeladen  
                     if (batlefthrs >= hrsToRun) {                     
-                       if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {        // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                       if (_sunup != '14:00' && compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {        // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                             if (_debug) {
                                 console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
                             }
@@ -626,7 +625,7 @@ async function processing() {
                     }
                 }
 
-                await entladezeitEntscheidung();
+                await entladezeitEntscheidung(_sunup);
                 if (_tibber_active_idx == 23) {              
                     entladeZeitenArrayVis = [];    
                     entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis     
@@ -741,15 +740,13 @@ async function processing() {
         if (_debug) {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
-        
-        let latesttime = pvBis;
 
         if (restladezeit == 0 || ((restladezeit * 2) <= pvfc.length && pvfc.length > 0)) {          // überschreibe die restladezeit mit möglichen pv ladezeiten
             restladezeit = Math.ceil(pvfc.length / 2);                          
         }
         
-        if (_debug && latesttime) {
-            console.info('Abschluss PV bis ' + latesttime);
+        if (_debug) {
+            console.info('Abschluss PV bis ' + pvBis);
             console.info('pvfc.length ' + pvfc.length + ' Restladezeit nach pvfc Ermittlung möglich ' + restladezeit);
         //    console.warn('pvfc ' + JSON.stringify(pvfc));
             console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');
@@ -812,7 +809,7 @@ async function processing() {
 
                     if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
                         _tibber_active_idx = 6;
-                        await entladezeitEntscheidung();
+                        await entladezeitEntscheidung(pvBis);
                     }
 
                     // komme aus tibber laufzeit
@@ -1080,24 +1077,36 @@ async function berechneVerbrauch() {
 }
 // ------------------------------------------- functions
 
-async function entladezeitEntscheidung() {
+async function entladezeitEntscheidung(pvBis) {
+
+    if (_debug) {
+        console.info('_entladeZeitenArray in neu Berechnung ' +  _entladeZeitenArray.length + ' pvBis ' + pvBis);
+    }
+
     if (_nurEntladestunden) {
-        for (let c = 0; c < _entladeZeitenArray.length; c++) {                
-            if (_vehicleConsum > 0) {                                                               // wenn fahrzeug am laden dann aber nicht aus der batterie laden
-                break;
-            }
-
+   /*     if (pvBis == '14:00' && _entladeZeitenArray.length < 1) {
+            _tibber_active_idx = 22;
             if (_debug) {
-                console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
-            }
+                console.warn('keine Entladezeiten und keine nicht genug Sonne');
+            }     
+        } else {*/
+            for (let c = 0; c < _entladeZeitenArray.length; c++) {                
+                if (_vehicleConsum > 0) {                           // wenn fahrzeug am laden dann aber nicht aus der batterie laden
+                    break;
+                }
 
-            if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
-                //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
-                _istEntladezeit = true;
-                _tibber_active_idx = 2;
-                break;
+                if (_debug) {
+                    console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
+                }
+
+                if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
+                    //   console.warn('entladezeit ' + _entladeZeitenArray[c][1]);
+                    _istEntladezeit = true;
+                    _tibber_active_idx = 2;
+                    break;
+                }
             }
-        }
+     //   }
     } else {
         _tibber_active_idx = 23;
         _entladeZeitenArray = [];
@@ -1399,3 +1408,4 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
+

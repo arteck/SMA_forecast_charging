@@ -1,13 +1,13 @@
 
-const _spntComCheckDP   = '0_userdata.0.strom.40151_Kommunikation_Check';
-const _triggerDP        = 'modbus.0.inputRegisters.3.30193_Systemzeit_als_trigger';
-
+const _spntComCheckDP       = '0_userdata.0.strom.40151_Kommunikation_Check';
+const _triggerDP            = 'modbus.0.inputRegisters.3.30193_Systemzeit_als_trigger';
+const _batteryLadePowerMax  = 5000;                                 // max Batterie ladung 
 
 let _wirdGeladen    = false;
 let _battLaden      = false;
 
 setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
-setState('0_userdata.0.strom.batterieLadenManuellForce', false, true); 
+setState('0_userdata.0.strom.batterieLadenManuellForce', false); 
 
 on({id: _triggerDP, change: 'ne'}, function() {  // aktualisiere laut adapter abfrageintervall   
     let battSOC                 = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val;        
@@ -24,14 +24,15 @@ on({id: _triggerDP, change: 'ne'}, function() {  // aktualisiere laut adapter ab
     if (!_wirdGeladen) {
         if (tibberNutzenManuell && tibberStartStunde == aktuelleStunde) {
             _battLaden = true; 
-            setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', _battLaden, true);
-            setState('0_userdata.0.strom.batterieLadenManuellForce', _battLaden, true);
+            setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden, true);                 // button manuelle laden
+            setState('0_userdata.0.strom.batterieLadenManuellForce', _battLaden, true);                 // checkbox
+            setState('0_userdata.0.strom.batterieLadenManuellForceWatt',_batteryLadePowerMax, true);    // watt anzahl
             _wirdGeladen = true;
         }
     }
 
     if (_battLaden) {
-        if (battSOC > battSOCBis) {
+        if (battSOC >= battSOCBis) {
             processingOff(); 
         } else {
             setTimeout(function () {  
@@ -69,9 +70,7 @@ function processingLaden() {
     
     //console.warn('Starte Batterie Laden mit Tibber ladenMax ' + ladenMax); 
     setState('0_userdata.0.strom.batterieLadenManuellWert', ladenMax, true);
-
 }
-
 
 function processingOff() {
     toLog('Stoppe Batterie Laden manuell',true );
@@ -82,12 +81,11 @@ function processingOff() {
     _battLaden      = false;
     _wirdGeladen    = false;
 
-    setState('0_userdata.0.strom.batterieLadenManuellForce', false, true); 
+    setState('0_userdata.0.strom.batterieLadenManuellForce', false); 
     setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', false, true);
 }
 
 function ladungStart(wert) {    
-
     //console.warn('an WR gesendet ' + wert);
     setState('modbus.0.holdingRegisters.3.40151_Kommunikation', 802);   // 802 active, 803 inactive
 

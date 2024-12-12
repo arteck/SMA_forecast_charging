@@ -337,9 +337,9 @@ async function processing() {
         const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
         _tibber_active_idx          = 0;                                                        // initialisiere
 
-        const tibberPvForcast       = getState(tibberPvForcastDP).val;
-        const tibberPoiAll          = await sortArrayByCurrentHour(tibberPvForcast, true, _hhJetzt);  // sortiert ab jetzt
-        const tibberPoihighSorted   = await sortArrayByCurrentHour(tibberPvForcast, false, '00');     // sortiert ab 0 Uhr
+        const tibberPreisHeute      = getState(tibberPvForcastDP).val;
+        const tibberPoiAll          = await sortArrayByCurrentHour(tibberPreisHeute, true, _hhJetzt);  // sortiert ab jetzt
+        const tibberPoihighSorted   = await sortArrayByCurrentHour(tibberPreisHeute, false, '00');     // sortiert ab 0 Uhr
         
         //console.info('tibberPoiAll ' +  JSON.stringify(tibberPoiAll));
         //console.info('tibberPoihighSorted ' +  JSON.stringify(tibberPoihighSorted));
@@ -723,7 +723,7 @@ async function processing() {
 //      _tibber_active_idx = 6;                 Entladung stoppen nutze nur Entladestunden 
 //      _tibber_active_idx = 88;                notladung
 
-    if (_debug) {
+    if (_debug && !_batterieLadenUebersteuernManuell) {
         console.error('-->> Verlasse Tibber Sektion mit _SpntCom ' + _SpntCom + ' _max_pwr ' + _max_pwr + ' _tibber_active_idx ' + _tibber_active_idx);
         console.error('-->  PV ' + _dc_now + ' Verbrauch ' + _verbrauchJetzt + ' Restladezeit ' + restladezeit + ' Restlademenge ' + restlademenge);
     }
@@ -901,7 +901,7 @@ async function sendToWR(commWR, pwrAtCom) {
             setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
         }
 
-        if (_debug && !_batterieLadenUebersteuernManuell) {
+        if (_debug) {
             console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom);
             console.info('----------------------------------------------------------------------------------');
         }
@@ -1408,4 +1408,3 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;        
     }
 }
-

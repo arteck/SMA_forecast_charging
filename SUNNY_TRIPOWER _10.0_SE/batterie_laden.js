@@ -8,6 +8,7 @@ let _battLaden      = false;
 
 setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
 setState('0_userdata.0.strom.batterieLadenManuellForce', false); 
+setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);
 
 on({id: _triggerDP, change: 'ne'}, function() {  // aktualisiere laut adapter abfrageintervall   
     let battSOC                 = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val;        
@@ -70,7 +71,9 @@ function processingLaden() {
     
     //console.warn('Starte Batterie Laden mit Tibber ladenMax ' + ladenMax); 
     setState('0_userdata.0.strom.batterieLadenManuellWert', ladenMax, true);
+
 }
+
 
 function processingOff() {
     toLog('Stoppe Batterie Laden manuell',true );
@@ -81,11 +84,14 @@ function processingOff() {
     _battLaden      = false;
     _wirdGeladen    = false;
 
-    setState('0_userdata.0.strom.batterieLadenManuellForce', false); 
-    setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', false, true);
+    setState('0_userdata.0.strom.batterieLadenManuellForce', _battLaden); 
+    setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', _battLaden);
+    setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);
+    setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
 }
 
 function ladungStart(wert) {    
+
     //console.warn('an WR gesendet ' + wert);
     setState('modbus.0.holdingRegisters.3.40151_Kommunikation', 802);   // 802 active, 803 inactive
 

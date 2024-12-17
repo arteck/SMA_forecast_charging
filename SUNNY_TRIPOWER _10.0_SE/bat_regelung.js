@@ -1,3 +1,4 @@
+// @ts-ignore
 const userDataDP            = '0_userdata.0';
 const tibberStromDP         = 'strom.tibber.';
 const tibberDP              = userDataDP + '.' + tibberStromDP;
@@ -62,11 +63,11 @@ const   _klimaDP                  = 'esphome.0.C4D8D50BCE6E.Climate.3365136539.m
 let     _istKlimaAn               = 0;                                                // läuft die klima bei mir 0 = aus
 const   _reduzierungStundenKlima  = 2;                                                // ladedauer verkürzen um x Stunden nach hinten wenn klima an 
 
-
 // tibber Preis Bereich
 let   _snowmode                 = false;                                        // manuelles setzen des Schneemodus, dadurch wird in der Nachladeplanung die PV Prognose ignoriert, z.b. bei Schneebedeckten PV Modulen und der daraus resultierenden falschen Prognose
 let   _start_charge             = 0.1881;                                       // Eigenverbrauchspreis
 const _stop_discharge           = aufrunden(4, _start_charge * _loadfact);      // 0.19 * 1.33 = 0.2533 €
+const _maxHHOhnePV             = '23:59';
 
 // Fahrzeug mit berücksichtigen in Verbrauchsrechnung EVCC Adapter benötigt
 const _considerVehicle   = true;
@@ -77,8 +78,6 @@ let   _vehicleConsum     = 0;
 const isVehicleConnDP    = 'evcc.0.loadpoint.1.status.connected';                // ist Fahrzeug gerade an der Ladeseule DP
 const vehicleConsumDP    = 'evcc.0.loadpoint.1.status.chargePower';              // angaben in W
 const evccModusDP        = 'evcc.0.loadpoint.1.status.mode';                     // lademodus
-
-
 
 const communicationRegisters = {   
     fedInSpntCom: 'modbus.0.holdingRegisters.3.40151_Kommunikation',                  

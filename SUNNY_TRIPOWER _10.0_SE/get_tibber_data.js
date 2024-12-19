@@ -6,6 +6,8 @@ const _tibberDP = _tibberDP1 + '.' + _tibberDP2;
 
 const options = { hour12: false, hour: '2-digit', minute:'2-digit'};
    
+const _tibberLevelErmitteln = false;
+
 //createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellHH', { 'name': 'nutze Tibber Preise manuell ab Stunde ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0 }], function () {
 //    setState(tibberDP + 'extra.tibberNutzenManuellHH', 0, true);
 //});
@@ -22,9 +24,20 @@ createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberBestPreis', { 'na
 createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPreisJetzt', { 'name': 'tibber Preis Jetzt', 'type':'number', 'read': true, 'write': false, 'role': 'state', 'def':0, "unit": "ct" }], function () {        
   setState(_tibberDP + 'extra.tibberPreisJetzt', 0, true);
 }); 
+
 createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPreisNächsteStunde', { 'name': 'tibber Preis Nächste Stunde', 'type':'number', 'read': true, 'write': false, 'role': 'state', 'def':0, "unit": "ct" }], function () {        
   setState(_tibberDP + 'extra.tibberPreisNächsteStunde', 0, true);
 }); 
+
+if (_tibberLevelErmitteln) {
+    createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberLevelJetzt', { 'name': 'Preis Level', 'type':'string', 'read': true, 'write': false, 'role': 'text',  'def': '' }], function () {        
+        setState(_tibberDP + 'extra.tibberLevelJetzt', '', true);
+    });  
+
+    createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberLevelNächsteStunde', { 'name': 'Preis Level', 'type':'string', 'read': true, 'write': false, 'role': 'text',  'def': '' }], function () {        
+        setState(_tibberDP + 'extra.tibberLevelNächsteStunde', '', true);
+    }); 
+}
 
 // bei jeder preisänderung wird die neue Stunde mit dem niedrigen Preis für die vis übernommen
 //const tibberNutzenManuell   = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell').val;
@@ -185,18 +198,28 @@ function startZeit(preiseKurz) {
 }
 
 function preisJetzt() {
-    let hh = Number(getHH());
-    let preis = getState(_tibber + 'PricesToday.' + hh + '.total').val;
-    
+    let hh          = Number(getHH());
+    let preis       = getState(_tibber + 'PricesToday.' + hh + '.total').val;
+    let tibberLevel = getState(_tibber + 'PricesToday.' + hh + '.level').val;
+
     setState(_tibberDP + 'extra.tibberPreisJetzt', preis, true);
+
+    if (_tibberLevelErmitteln) {    
+        setState(_tibberDP + 'extra.tibberLevelJetzt', tibberLevel, true);
+    }
 
     hh = hh + 1;
     if (hh > 23) {
         hh = 0;
     }
     
-    preis = getState(_tibber + 'PricesToday.' + hh + '.total').val;
+    preis       = getState(_tibber + 'PricesToday.' + hh + '.total').val;
+    tibberLevel = getState(_tibber + 'PricesToday.' + hh + '.level').val;
     setState(_tibberDP + 'extra.tibberPreisNächsteStunde', preis, true);
+
+    if (_tibberLevelErmitteln) {    
+        setState(_tibberDP + 'extra.tibberLevelNächsteStunde', tibberLevel, true);
+    }
 }
 
 schedule('0 * * * *', function () {

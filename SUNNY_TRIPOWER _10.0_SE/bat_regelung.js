@@ -216,6 +216,9 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.nutzeNurEntladezeite
 createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellHH', { 'name': 'nutze Tibber Preise manuell ab Stunde ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0 }], function () {
     setState(tibberDP + 'extra.tibberNutzenManuellHH', 0, true);
 });
+createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellProzent', { 'name': 'lade mit tibber bis SOC ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 100 }], function () {
+    setState(tibberDP + 'extra.tibberNutzenManuellProzent', 0, true);
+});
 createUserStates(userDataDP, false, [tibberStromDP + 'extra.PV_Schneebedeckt', { 'name': 'ist die PV mit Schnee bedekt ', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(tibberDP + 'extra.PV_Schneebedeckt', false, true);
 });

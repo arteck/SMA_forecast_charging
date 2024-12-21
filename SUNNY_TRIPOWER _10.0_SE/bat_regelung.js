@@ -9,7 +9,6 @@ const tomorrow_kWDP         = userDataDP + '.strom.pvforecast.tomorrow.gesamt.to
 const tibberPreisJetztDP    = tibberDP + 'extra.tibberPreisJetzt';
 const tibberPvForcastDP     = tibberDP + 'extra.tibberPvForcast';
 
-
 const batterieLadenUhrzeitDP        = userDataDP + '.strom.batterieLadenUhrzeit';
 const batterieLadenUhrzeitStartDP   = userDataDP + '.strom.batterieLadenUhrzeitStart';
 const batterieLadenManuellStartDP   = userDataDP + '.strom.batterieLadenManuellStart';
@@ -201,7 +200,7 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.prognoseNutzenAutoma
 createUserStates(userDataDP, false, ['strom.batterieLadenManuellStart', { 'name': 'starte manuelles Laden der Batterie', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(batterieLadenManuellStartDP, false, true);
 });
-createUserStates(userDataDP, false, ['strom.batterieLadenManuellForce', { 'name': 'starte manuelles Laden der Batterie', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
+createUserStates(userDataDP, false, ['strom.batterieLadenManuellForce', { 'name': 'manuelles Laden der Batterie erzwingen', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(batterieLadenManuellForceDP, false, true);
 });
 createUserStates(userDataDP, false, ['strom.batterieLadenUhrzeitStart', { 'name': 'automatisch starten ab stunde', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
@@ -501,7 +500,7 @@ async function processing() {
                 return a[0] - b[0];
             })
 
-            //nachlademenge Wh nach höchstpreisen am Tag            
+            //nachlademenge Wh nach höchstpreisen am Tag muss aber über schwellenwert sein sonst lohnt sich das nachladen nicht schwellenwert_Entladung         
             let nachladeMengeWh = ((prchigh.length * ((_baseLoad + _klimaLoad) /2)) / _wr_efficiency);   // ich mag alles in klammern
             
             if (hrsToRun < 24 && !_snowmode) {
@@ -527,15 +526,15 @@ async function processing() {
             }
 
             if (_debug) {
-                console.info('nach Nachladestunden prclow.length ' + nachladeStunden + ' restlademenge ' + restlademenge);
-          //    console.info('prclow  Nachladestunden ' + JSON.stringify(prclow));
-          //    console.info('prchigh Nachladestunden ' + JSON.stringify(prchigh));
+                console.info('nach Nachladestunden prclow.length ' + nachladeStunden + ' restlademenge ' + restlademenge + ' pvWh ' + pvWh);
+            //  console.info('prclow  Nachladestunden ' + JSON.stringify(prclow));              
+            //  console.info('prchigh Nachladestunden ' + JSON.stringify(prchigh));
             }         
 
             if (nachladeStunden > 0 && pvWh < (_baseLoad + _klimaLoad) * 24 * _wr_efficiency) {                 
                 // aufbau der zeiten zum nachladen weiter im _tibber_active_idx = 5
                 if (aufrunden(2, nachladeMengeWh - curbatwh) > 0) {
-                    for (let i = 0; i < nachladeStunden; i++) {
+                    for (let i = 0; i < aufrunden(0,nachladeStunden); i++) {
                         if (_debug) {
                             console.warn('Nachladezeit: ' + prclow[i][1] + '-' + prclow[i][2] + ' zum Preis ' + prclow[i][0] + ' (' + aufrunden(2, nachladeMengeWh - curbatwh) + ' Wh)');
                         }

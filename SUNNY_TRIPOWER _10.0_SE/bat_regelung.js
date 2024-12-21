@@ -13,6 +13,7 @@ const tibberPvForcastDP     = tibberDP + 'extra.tibberPvForcast';
 const batterieLadenUhrzeitDP        = userDataDP + '.strom.batterieLadenUhrzeit';
 const batterieLadenUhrzeitStartDP   = userDataDP + '.strom.batterieLadenUhrzeitStart';
 const batterieLadenManuellStartDP   = userDataDP + '.strom.batterieLadenManuellStart';
+const batterieLadenManuellForceDP   = userDataDP + '.strom.batterieLadenManuellForce';
 
 const pvUpdateDP                    = userDataDP + '.strom.pvforecast.lastUpdated';
 
@@ -196,10 +197,12 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.prognoseNutzenAutoma
     setState(tibberDP + 'extra.prognoseNutzenAutomatisch', _prognoseNutzenAutomatisch, true);
 });
 
-
 // zum manuellen übersteuern
 createUserStates(userDataDP, false, ['strom.batterieLadenManuellStart', { 'name': 'starte manuelles Laden der Batterie', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(batterieLadenManuellStartDP, false, true);
+});
+createUserStates(userDataDP, false, ['strom.batterieLadenManuellForce', { 'name': 'starte manuelles Laden der Batterie', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
+    setState(batterieLadenManuellForceDP, false, true);
 });
 createUserStates(userDataDP, false, ['strom.batterieLadenUhrzeitStart', { 'name': 'automatisch starten ab stunde', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(batterieLadenUhrzeitStartDP, false, true);
@@ -216,7 +219,7 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.nutzeNurEntladezeite
 createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellHH', { 'name': 'nutze Tibber Preise manuell ab Stunde ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0 }], function () {
     setState(tibberDP + 'extra.tibberNutzenManuellHH', 0, true);
 });
-createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellProzent', { 'name': 'lade mit tibber bis SOC ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 100 }], function () {
+createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellProzent', { 'name': 'lade mit tibber bis SOC ', 'type': 'number', 'read': true, 'write': true, 'role': 'value', 'def': 100 }], function () {
     setState(tibberDP + 'extra.tibberNutzenManuellProzent', 0, true);
 });
 createUserStates(userDataDP, false, [tibberStromDP + 'extra.PV_Schneebedeckt', { 'name': 'ist die PV mit Schnee bedekt ', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
@@ -225,14 +228,12 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.PV_Schneebedeckt', {
 createUserStates(userDataDP, false, ['strom.40151_Kommunikation_Check', { 'name': '40151_Kommunikation_Check', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 803 }], function () {
     setState(spntComCheckDP, _InitCom_Aus, true);
 });
-createUserStates(userDataDP, false, ['strom.Momentan_Verbrauch', { 'name': 'Momentan_Verbrauch', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
+createUserStates(userDataDP, false, [strom.Momentan_Verbrauch', { 'name': 'Momentan_Verbrauch', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
     setState(momentan_VerbrauchDP, 0, true);
 });
 createUserStates(userDataDP, false, ['strom.PV_Leistung_aktuell', { 'name': 'PV_Leistung_aktuell dc1 + dc2', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
     setState(pv_Leistung_aktuellDP, 0, true);
 });
-
-
 
 Zeile entfernen  */ 
 
@@ -690,7 +691,6 @@ async function processing() {
             if (_istEntladezeit && pvfc.length < 1) {
                 if (_debug) {                                        
                     console.warn('Stoppe Entladung, Preis jetzt ' + _tibberPreisJetzt + ' ct/kWh unter Batterieschwelle von ' + aufrunden(2, _stop_discharge) + ' ct/kWh oder battSoc = 0 ist ' + _batsoc );
-                    console.info(' _SpntCom ' + _SpntCom + ' _max_pwr ' + _max_pwr + ' _tibber_active_idx ' + _tibber_active_idx);                    
                 }
 
                 if (_tibber_active_idx != 22) {  // aber nicht wenn die ladung bis zum ende reicht
@@ -750,13 +750,13 @@ async function processing() {
             console.error('--> Starte prognose Nutzen Steuerung ');
         }
 
-        if (restladezeit == 0 || ((restladezeit * 2) <= pvfc.length && pvfc.length > 0)) {          // überschreibe die restladezeit mit möglichen pv ladezeiten
-            restladezeit = Math.ceil(pvfc.length / 2);                          
-        }
+       // if (restladezeit == 0 || ((restladezeit * 2) <= pvfc.length && pvfc.length > 0)) {          // überschreibe die restladezeit mit möglichen pv ladezeiten
+       //     restladezeit = Math.ceil(pvfc.length / 2);                          
+       // }
         
         if (_debug) {
             console.info('Abschluss PV bis ' + pvBis);
-            console.info('pvfc.length ' + pvfc.length + ' Restladezeit nach pvfc Ermittlung möglich ' + restladezeit);
+            console.info('pvfc.length ' + pvfc.length);
         //    console.warn('pvfc ' + JSON.stringify(pvfc));
             console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');
         }        
@@ -788,9 +788,9 @@ async function processing() {
             setState(tibberDP + 'extra.Batterieladung_soll', _max_pwr, true);
 
             // zero werte nicht erlaubt
-            if (_max_pwr == 0) {
-                _max_pwr = _mindischrg;            
-            }
+            //if (_max_pwr == 0) {
+            //    _max_pwr = _mindischrg;            
+            //}
 
             if (_debug) {
                 console.info('Ausgabe :_max_pwr ' + _max_pwr + ' ist ladezeit ' + _istLadezeit);
@@ -834,7 +834,7 @@ async function processing() {
                         console.warn('-->> mit überschuss _max_pwr ' + _max_pwr);
                     }
                     
-                    if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto)) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
+                    if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
                         _max_pwr = _dc_now - verbrauchJetztOhneAuto;
                         
                         if (_tibber_active_idx == 5) {    // sind in der nachledezeit
@@ -854,7 +854,7 @@ async function processing() {
                 }
             }     
        
-            if (_batsoc < 91) {
+            if (_batsoc < 91 && _max_pwr > _mindischrg) {
                 let max_pwrReserve = _max_pwr + _max_pwr * 0.05;    // 5 % reserve damit kein bezug aus dem netz bei schwankung
 
                 if (_dc_now < max_pwrReserve) {
@@ -1357,7 +1357,7 @@ function addMinutesToTime(timeStr, minutesToAdd) {
 }
 
 function tibber_active_auswertung() {
-    _max_pwr = _mindischrg;
+    _max_pwr = _mindischrg;                                                            // sicher ist sicher
   
     switch (_tibber_active_idx) {
         case 0:       
@@ -1387,10 +1387,7 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_Aus;
             break;    
         case 21:
-            _SpntCom = _InitCom_Aus;         
-            // if (kommeAusPrognose && _entladeZeitenArray.length > 1 ) {     //      halte die batterie bei  1 = da ist der --:-- drin
-            //     _SpntCom = _InitCom_An;  
-            // } 
+            _SpntCom = _InitCom_Aus;                     
             break;  
         case 22:                            //      _tibber_active_idx = 22;   Entladezeit reicht aus bis zum Sonnaufgang        
             _SpntCom = _InitCom_Aus;             

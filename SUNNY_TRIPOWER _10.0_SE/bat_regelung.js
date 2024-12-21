@@ -225,12 +225,14 @@ createUserStates(userDataDP, false, [tibberStromDP + 'extra.PV_Schneebedeckt', {
 createUserStates(userDataDP, false, ['strom.40151_Kommunikation_Check', { 'name': '40151_Kommunikation_Check', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 803 }], function () {
     setState(spntComCheckDP, _InitCom_Aus, true);
 });
-createUserStates(userDataDP, false, [strom.Momentan_Verbrauch', { 'name': 'Momentan_Verbrauch', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
+createUserStates(userDataDP, false, ['strom.Momentan_Verbrauch', { 'name': 'Momentan_Verbrauch', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
     setState(momentan_VerbrauchDP, 0, true);
 });
 createUserStates(userDataDP, false, ['strom.PV_Leistung_aktuell', { 'name': 'PV_Leistung_aktuell dc1 + dc2', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'kW', }], function () {
     setState(pv_Leistung_aktuellDP, 0, true);
 });
+
+
 
 Zeile entfernen  */ 
 

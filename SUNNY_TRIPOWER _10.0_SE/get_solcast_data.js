@@ -44,7 +44,7 @@ let aufrufSeite = '';
 
 // ------------------------------------------------------------------------------------------------------------------
 
-// zum testen
+//                       zum testen
 //const testDaten = getState(`${mainObject}.response`).val;
 //datenErzeugen(JSON.parse(testDaten), seite2);
 
@@ -56,10 +56,12 @@ schedule({ astro: 'sunset' }, () => {
 schedule({ astro: 'sunrise' }, () => {
     initialPV();
 
-    aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-    aufrufSeite = seite2;
-    toLog(`Hole PV ${aufrufSeite}`, true);
-    requestData(aufrufUrl, aufrufSeite);
+    if (seite2.length > 0) {
+        aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        aufrufSeite = seite2;
+        toLog(`Hole PV ${aufrufSeite}`, true);
+        requestData(aufrufUrl, aufrufSeite);
+    }
 
     aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
     aufrufSeite = seite1;
@@ -69,12 +71,21 @@ schedule({ astro: 'sunrise' }, () => {
     _tickerAbholung = +1;
 });
 
+
+schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben
+    if (seite2.length > 0) {
+        aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        aufrufSeite = seite2;
+        requestData(aufrufUrl, aufrufSeite);
+    }
+});
+
 // 10 request sind frei bei solcast.com
-schedule('1 6,7,9,10 * * *', function () {
+schedule('1 7,9,10 * * *', function () {
     const _hhJetzt  = getHH();
     const sunup = getState('javascript.0.variables.astro.sunrise').val;  
 
-    if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {  
+    if (_hhJetzt >= parseInt(sunup.slice(0, 2)) && seite2.length > 0) {  
         aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
         aufrufSeite = seite2;
         requestData(aufrufUrl, aufrufSeite);
@@ -108,13 +119,13 @@ schedule('5,10,15 * * * *', function () {
 
 async function requestData(seiteUrl, seite) {
     const url = `${_baseUrl}${seiteUrl}`;   
-    
+    _errorMrk = false;
+
     httpGet(url, { timeout: 9000, responseType: 'text' }, async (err, response) => {
         if (err) {
             _errorMrk = true;
             console.error(err);           
-        } else {
-            _errorMrk = false;
+        } else {           
             const jsonData  = JSON.parse(response.data);
             const array     = jsonData.forecasts;
             
@@ -128,11 +139,8 @@ async function requestData(seiteUrl, seite) {
 // --------------------------------------------------------------------
 
 function datenErzeugen(array, seite) {
-    const list = [];     
-
-    let heute = true;
-
-
+    const list          = [];  
+    let heute           = true;
 
     for (let i = 0; i < array.length; i++) {                              
         const endtime = Date.parse(array[i].period_end);
@@ -164,7 +172,8 @@ function datenErzeugen(array, seite) {
         } 
 
         list[i] = {
-            time: startTime / 1000,
+            starttime: startTime / 1000,
+            endtime: endtime / 1000,
             wert1: Math.round(wert1 * 1000),
             wert2: Math.round(wert2 * 1000),
         };
@@ -172,7 +181,7 @@ function datenErzeugen(array, seite) {
      //   console.warn('list ' + JSON.stringify(list));
     }
 
-    const startTime = new Date(list[0].time * 1000);
+    const startTime = new Date(list[0].starttime * 1000);
     const startDPTime = startTime.toLocaleTimeString('de-DE', options);
 
     let ind = 0;
@@ -192,8 +201,8 @@ function datenErzeugen(array, seite) {
         let posiA = ind - 1;
         let schonGebucht = false;
         
-        let powerWGes = 0;
-        let power90WGes = 0;
+        let wertW1Ges = 0;
+        let wertW2Ges = 0;
 
         for (let a = 0; a < _hours * 4; a++) {
             listenDP += 1;
@@ -202,8 +211,10 @@ function datenErzeugen(array, seite) {
                 break;
             }
 
-            const start = new Date(list[listenDP].time * 1000);
-            const startTime = start.toLocaleTimeString('de-DE', options);
+            const starttt       = new Date(list[listenDP].starttime * 1000);
+            const endtt         = new Date(list[listenDP].endtime * 1000);
+            const startTime     = starttt.toLocaleTimeString('de-DE', options);
+            const endTime       = endtt.toLocaleTimeString('de-DE', options);
 
             if (startTime == abbrechenBei) {   // wir brauchen nur bis nachts
                 if (schonGebucht) {
@@ -219,52 +230,51 @@ function datenErzeugen(array, seite) {
             posiA += 1;
 
             let stateBaseName1 = `${mainObjectToday}.${seite1}.${posiA}.`;
-            let stateBaseName2 = `${mainObjectToday}.${seite2}.${posiA}.`;
+            let stateBaseName2 = ``;
+            
+            if (seite2.length > 0) {
+                stateBaseName2 = `${mainObjectToday}.${seite2}.${posiA}.`;
+            }
+            
             let stateBaseNameGes = `${mainObjectToday}.${gesamt}.${posiA}.`;
 
             if (!heute) {
                 stateBaseName1 = `${mainObjectTomorrow}.${seite1}.${posiA}.`;
-                stateBaseName2 = `${mainObjectTomorrow}.${seite2}.${posiA}.`;
+                if (seite2.length > 0) {
+                    stateBaseName2 = `${mainObjectTomorrow}.${seite2}.${posiA}.`;
+                }
                 stateBaseNameGes = `${mainObjectTomorrow}.${gesamt}.${posiA}.`;
             }
 
-            //const powerW = list[listenDP].watt / 2;      // es kommen 2 DP pro stunde also teilen
-            //const power90W = list[listenDP].watt90 / 2;
-
-            let powerW = list[listenDP].wert1;      
-            let power90W = list[listenDP].wert2;
-
-            if (!heute) {                               // für morgen werte mal drehen
-                powerW = list[listenDP].wert2;      
-                power90W = list[listenDP].wert1;
-            }
+            let wertW1 = list[listenDP].wert1;      
+            let wertW2 = list[listenDP].wert2;
 
             if (seite == seite1) {
-                setState(stateBaseName1 + 'power', powerW, true);
-                setState(stateBaseName1 + 'power90', power90W, true);
+                setState(stateBaseName1 + 'power', wertW1, true);
+                setState(stateBaseName1 + 'power90', wertW2, true);
                 
                 const powerWName2 = getState(stateBaseName2 + 'power').val;
                 const powerW90Name2 = getState(stateBaseName2 + 'power90').val;
 
-                powerWGes = powerW + powerWName2;
-                power90WGes = power90W + powerW90Name2;
+                wertW1Ges = wertW1 + powerWName2;
+                wertW2Ges = wertW2 + powerW90Name2;
             }
 
             if (seite == seite2) {
-                setState(stateBaseName2 + 'power', powerW, true);
-                setState(stateBaseName2 + 'power90', power90W, true);
+                setState(stateBaseName2 + 'power', wertW1, true);
+                setState(stateBaseName2 + 'power90', wertW2, true);
 
                 const powerWName1 = getState(stateBaseName1 + 'power').val;
                 const power90WName1 = getState(stateBaseName1 + 'power90').val;
 
-                powerWGes = powerW + powerWName1;
-                power90WGes = power90W + power90WName1;
+                wertW1Ges = wertW1 + powerWName1;
+                wertW2Ges = wertW2 + power90WName1;
             }                             
 
-            setState(stateBaseNameGes + 'power', parseInt((powerWGes).toFixed(3)), true);
-            setState(stateBaseNameGes + 'power90', parseInt((power90WGes).toFixed(3)), true);               
-        }
-
+            setState(stateBaseNameGes + 'power', parseInt((wertW1Ges).toFixed(3)), true);
+            setState(stateBaseNameGes + 'power90', parseInt((wertW2Ges).toFixed(3)), true);
+        }        
+        
         genGraphAnlegen(true);    // erzeuge today
         genGraphAnlegen(false);   // erzeuge tomorrow
 
@@ -276,7 +286,9 @@ function datenErzeugen(array, seite) {
 
 async function initialPV() {
     await seiteAnlegen(seite1);
-    await seiteAnlegen(seite2);
+    if (seite2.length > 0) {
+        await seiteAnlegen(seite2);
+    }
     await seiteAnlegen(gesamt);
 }
 
@@ -383,11 +395,11 @@ async function seiteAnlegen(seite) {
     }
 
     if (summeDpAnlegen) {
-        await kWAnlegen(seite);
+        await dPAnlegen(seite);
     }   
 }
 
-async function kWAnlegen(seite) {
+async function dPAnlegen(seite) {
     const dp = mainObject + '.';
 
     createUserStates('0_userdata.0', true, [dp + 'lastUpdated', { 'name': 'Letztes Update (Daten)', 'type': 'number', 'read': true, 'write': false, 'role': 'value.time', 'def': 0 }], function () {
@@ -400,24 +412,23 @@ async function kWAnlegen(seite) {
 
     const dp1 = mainObjectToday + '.' + seite + '.';
 
-    createUserStates('0_userdata.0', true, [dp1 + 'today_kW', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
+    createUserStates('0_userdata.0', true, [dp1 + 'today_kW', { 'name': 'today_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
         setStateAsync(dp1 + 'today_kW', 0, true);
     });
 
-    createUserStates('0_userdata.0', true, [mainObjectToday + '.JSONGraph', { 'name': 'power90', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
+    createUserStates('0_userdata.0', true, [mainObjectToday + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
         setStateAsync(mainObjectToday + '.JSONGraph', '{}', true);
     });
 
     const dp2 = mainObjectTomorrow + '.' + seite + '.';
 
-    createUserStates('0_userdata.0', true, [dp2 + 'tomorrow_kW', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
+    createUserStates('0_userdata.0', true, [dp2 + 'tomorrow_kW', { 'name': 'tomorrow_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
         setStateAsync(dp2 + 'tomorrow_kW', 0, true);
     });
 
-    createUserStates('0_userdata.0', true, [mainObjectTomorrow + '.JSONGraph', { 'name': 'power90', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
+    createUserStates('0_userdata.0', true, [mainObjectTomorrow + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
         setStateAsync(mainObjectTomorrow + '.JSONGraph', '{}', true);
     });
-
 }
 
 //------------ graph
@@ -439,26 +450,31 @@ function genGraphAnlegen(today) {
     let powerWGes = 0;
     let powerWGesName1 = 0;
     let powerWGesName2 = 0;
-    //let power90WGes = 0;
     
     for (let posiA = 0; posiA < _hours * 2; posiA++) {
     
         let stateBaseNameGes = `${mainObjectGraph}.${gesamt}.${posiA}.`;
         let stateBaseName1 = `${mainObjectGraph}.${seite1}.${posiA}.`;
-        let stateBaseName2 = `${mainObjectGraph}.${seite2}.${posiA}.`;
+        let stateBaseName2 = ``;
 
+        if (seite2.length > 0) {
+            stateBaseName2 = `${mainObjectGraph}.${seite2}.${posiA}.`;
+        }
         const startTime = getState(stateBaseNameGes + 'startTime').val;
 
         let powerWGesamt  = getState(stateBaseNameGes + 'power').val;
         let powerWName1   = getState(stateBaseName1 + 'power').val;
-        let powerWName2   = getState(stateBaseName2 + 'power').val;
+        let powerWName2   = 0;
          
-        //const power90W = getState(stateBaseNameGes + 'power90').val / 2;
+        if (seite2.length > 0) {
+            powerWName2   = getState(stateBaseName2 + 'power').val;
+        }
 
         powerWGes = powerWGes + powerWGesamt;
         powerWGesName1 = powerWGesName1 + powerWName1;
-        powerWGesName2 = powerWGesName2 + powerWName2;
-        //power90WGes = power90WGes + power90W;
+        if (seite2.length > 0) {
+            powerWGesName2 = powerWGesName2 + powerWName2;
+        }
     
         if (powerWGesamt > 0) {  
             if (startTime.match(':00')) {   
@@ -476,7 +492,9 @@ function genGraphAnlegen(today) {
     }
     
     setState(`${mainObjectGraph}.${seite1}.${dayTag}`,  Number(Math.round((powerWGesName1 /2/1000)*100)/100), true);
-    setState(`${mainObjectGraph}.${seite2}.${dayTag}`,  Number(Math.round((powerWGesName2 /2/1000)*100)/100), true);
+    if (seite2.length > 0) {
+        setState(`${mainObjectGraph}.${seite2}.${dayTag}`,  Number(Math.round((powerWGesName2 /2/1000)*100)/100), true);
+    }
     setState(`${mainObjectGraph}.${gesamt}.${dayTag}`, Number(Math.round((powerWGes /2/1000)*100)/100), true);
 
     genGraph(jsonGraphLabels, jsonGraphData, mainObjectGraph);

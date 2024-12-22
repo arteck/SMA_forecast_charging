@@ -2,15 +2,14 @@ const _tibber = 'tibberlink.0.Homes.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.';     // Anp
 
 const _tibberDP1 = '0_userdata.0';
 const _tibberDP2 = 'strom.tibber.';
-const _tibberDP = _tibberDP1 + '.' + _tibberDP2;
+const _tibberDP  = _tibberDP1 + '.' + _tibberDP2;
 
 const options = { hour12: false, hour: '2-digit', minute:'2-digit'};
    
+// bei jeder preisänderung wird die neue Stunde mit dem niedrigen Preis für die vis übernommen
+const tibberPreisUebermnehmen = true;
+// 
 const _tibberLevelErmitteln = false;
-
-//createUserStates(userDataDP, false, [tibberStromDP + 'extra.tibberNutzenManuellHH', { 'name': 'nutze Tibber Preise manuell ab Stunde ', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0 }], function () {
-//    setState(tibberDP + 'extra.tibberNutzenManuellHH', 0, true);
-//});
 
 createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPvForcast', { 'name': 'tibber formattierung für pv prognose', 'type':'array', 'read': true, 'write': false, 'role': 'json'}], function () {  }); 
 createUserStates(_tibberDP1, false, [_tibberDP2 + 'extra.tibberPvForcastTomorrow', { 'name': 'tibber rest preise für morgen', 'type':'array', 'read': true, 'write': false, 'role': 'json'}], function () {  }); 
@@ -39,13 +38,8 @@ if (_tibberLevelErmitteln) {
     }); 
 }
 
-// bei jeder preisänderung wird die neue Stunde mit dem niedrigen Preis für die vis übernommen
-//const tibberNutzenManuell   = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell').val;
-const tibberPreisUebermnehmen = true;
-
 holePreis();
 preisJetzt();
-
 
 function holePreis() {
     let preiseHeute = [];
@@ -81,7 +75,6 @@ function holePreis() {
         const hhStartTime   = startTime.split(':')[0];
 
         let objHeute = {};
-        let objMorgen = {};
             
         if (start >= now && start < next24Hours) {        
 //      console.warn(`Starts at: ${start}, Total: ${preis}`);
@@ -92,16 +85,28 @@ function holePreis() {
             preisePV.push([preis, startTime , hhStartTime + ':30']);
             preisePV.push([preis, hhStartTime + ':30', endTime]);            
         }
+    }
 
-        if (start > next24Hours) { 
-//        console.warn(`Starts at: ${start}, Total: ${preis}`);
-            objMorgen.start = start.getHours();
-            objMorgen.preis = preis;
-            preiseMorgen.push(objMorgen);
+// preise für morgen für die VIS
+    for (let m = 0; m < arr2.length; m++) {
+        const element       = arr2[m];
+        const startsAt      = element.startsAt;
+        const start         = new Date(startsAt);
+        const preis         = element.total;
+        const end           = new Date(Date.parse(startsAt)).getTime()+3600000;            
+        const startTime     = start.toLocaleTimeString('de-DE', options);
+        const endTime       = new Date(end).toLocaleTimeString('de-DE', options);
+        const hhStartTime   = startTime.split(':')[0];
 
-            preisePVTommorow.push([preis, startTime , hhStartTime + ':30']);
-            preisePVTommorow.push([preis, hhStartTime + ':30', endTime]);
-        }
+        let objMorgen = {
+            start : start.getHours(),
+            preis : preis
+        };
+                   
+        preiseMorgen.push(objMorgen);
+
+        preisePVTommorow.push([preis, startTime , hhStartTime + ':30']);
+        preisePVTommorow.push([preis, hhStartTime + ':30', endTime]);        
     }       
 
     let preiseSortLang = preiseHeute;
@@ -122,7 +127,7 @@ function holePreis() {
     setState(_tibberDP + 'extra.tibberPvForcast', preisePVSort, true);
     setState(_tibberDP + 'extra.tibberPvForcastTomorrow', preisePVTommorow, true);
 
-    errechneBesteUhrzeit(preiseHeute);
+    errechneBesteUhrzeit(preiseSortLang);
 }
 
 function sortArrayByStartTime(array, currentHour) {
@@ -164,30 +169,37 @@ function errechneBesteUhrzeit(allePreise) {
 }
 
 function findeBenachbarteNiedrigstePreise(preisArray) {     
-    let niedrigsterPreis = Number.POSITIVE_INFINITY;
-    let zweitNiedrigsterPreis = Number.POSITIVE_INFINITY;
-    let niedrigsterPreisIndex = -1;
-    let zweitNiedrigsterPreisIndex = -1;
+    let niedrigsterPreisSumme = Number.POSITIVE_INFINITY;
+    let niedrigsterPreisIndex1 = -1;
+    let niedrigsterPreisIndex2 = -1;
 
-    for (let i = 0; i < preisArray.length; i++) {
-        if (preisArray[i].preis < niedrigsterPreis) {
-            zweitNiedrigsterPreis = niedrigsterPreis;
-            zweitNiedrigsterPreisIndex = niedrigsterPreisIndex;
-            niedrigsterPreis = preisArray[i].preis;
-            niedrigsterPreisIndex = i;
-        } else if (preisArray[i].preis < zweitNiedrigsterPreis) {
-            zweitNiedrigsterPreis = preisArray[i].preis;
-            zweitNiedrigsterPreisIndex = i;
+    for (let i = 0; i < preisArray.length - 1; i++) {
+        // wir bilden eine summer
+        const summe = preisArray[i].preis + preisArray[i + 1].preis;
+
+        // Prüfe, ob diese Summe kleiner als die bisher niedrigste ist
+        if (summe < niedrigsterPreisSumme) {
+            niedrigsterPreisSumme = summe;
+            niedrigsterPreisIndex1 = i;
+            niedrigsterPreisIndex2 = i + 1;
         }
     }
-    return [niedrigsterPreisIndex, zweitNiedrigsterPreisIndex];
+
+    if (niedrigsterPreisIndex1 > niedrigsterPreisIndex2) {
+        let temp = niedrigsterPreisIndex1;
+        niedrigsterPreisIndex1 = niedrigsterPreisIndex2;
+        niedrigsterPreisIndex2 = temp;        
+    }
+
+    // gebe den index raus
+    return [niedrigsterPreisIndex1, niedrigsterPreisIndex2];
 }
 
 function startZeit(preiseKurz) {   
     const tibberNutzenManuell = getState(_tibberDP + 'extra.tibberNutzenManuell').val; 
-    const obj = preiseKurz[0];
-    const start = obj.start * 1;
-    const preis = obj.preis * 1;
+
+    const start = preiseKurz[0].start;
+    const preis = preiseKurz[0].preis;
 
     preiseKurz.splice(0, 1);
 
@@ -213,10 +225,10 @@ function preisJetzt() {
         hh = 0;
     }
     
-    preis       = getState(_tibber + 'PricesToday.' + hh + '.total').val;    
+    preis       = getState(_tibber + 'PricesToday.' + hh + '.total').val;
     setState(_tibberDP + 'extra.tibberPreisNächsteStunde', preis, true);
 
-    if (_tibberLevelErmitteln) {  
+    if (_tibberLevelErmitteln) {    
         tibberLevel = getState(_tibber + 'PricesToday.' + hh + '.level').val;
         setState(_tibberDP + 'extra.tibberLevelNächsteStunde', tibberLevel, true);
     }
@@ -227,8 +239,3 @@ schedule('0 * * * *', function () {
     preisJetzt();
 });
 
-/*
-on({id: [_tibber +'CurrentPrice.startsAt'], change: 'any'}, function () {
-    holePreis();     
-});
-*/

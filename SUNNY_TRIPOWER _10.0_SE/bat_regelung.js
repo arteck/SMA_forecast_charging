@@ -244,7 +244,7 @@ console.info('***************************************************');
 console.info('starte ladenNachPrognose mit debug ' + _debug);
 
 // bei start immer initialisieren
-if (_tibberPreisJetzt <= _stop_discharge && _dc_now <= _verbrauchJetzt) {
+if (_tibberPreisJetzt <= _stop_discharge && _dc_now <= _verbrauchJetzt && _tibberNutzenSteuerung) {
     console.warn('starte direkt mit Begrenzung da Preis unter schwelle');
 }
 
@@ -259,7 +259,7 @@ async function processing() {
 
     _tick ++;
 
-    if (_tick >= 6 && !_batterieLadenUebersteuernManuell) {       // alle 6 ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
+    if (_tick >= 30 && !_batterieLadenUebersteuernManuell) {       // alle 6= 1 min ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
     //    const commNow = await getStateAsync(spntComCheckDP);
     //    setState(communicationRegisters.fedInSpntCom, commNow.val);                 // 40151_Kommunikation
         setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);        // schreibe irgendwas da rein.. 
@@ -303,7 +303,10 @@ async function processing() {
         _batteryLadePower =_battIn;  
     }     
 
-    _tibberPreisJetzt   = getState(tibberPreisJetztDP).val;
+    if (_tibberNutzenSteuerung) {  
+        _tibberPreisJetzt   = getState(tibberPreisJetztDP).val;
+    }
+    
     _tomorrow_kW        = getState(tomorrow_kWDP).val;
 
     // Lademenge
@@ -330,7 +333,7 @@ async function processing() {
         console.info('Ladeleistung Batterie jetzt_____ ' + _batteryLadePower + ' W');
     }
 
-    _SpntCom                = _InitCom_Aus;     // initialisiere AUS
+    // _SpntCom                = _InitCom_Aus;     // initialisiere AUS
     _max_pwr                = _mindischrg;      // initialisiere
     _maxchrg                = _mindischrg;      // initialisiere
     
@@ -340,7 +343,7 @@ async function processing() {
 
     if (_tibberNutzenSteuerung) {  
         const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
-        _tibber_active_idx          = 0;                                                        // initialisiere
+    //    _tibber_active_idx          = 0;                                                        // initialisiere
 
         const tibberPreisHeute      = getState(tibberPvForcastDP).val;
         const tibberPoiAll          = await sortArrayByCurrentHour(tibberPreisHeute, true, _hhJetzt);  // sortiert ab jetzt
@@ -634,11 +637,13 @@ async function processing() {
                     }
                 }
 
-                await entladezeitEntscheidung();
-                if (_tibber_active_idx == 23) {              
-                    entladeZeitenArrayVis = [];    
-                    entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis     
-                };
+                if (!_istEntladezeit) {                     // Entladezeit reicht aus bis zum Sonnaufgang von oben
+                    await entladezeitEntscheidung();
+                    if (_tibber_active_idx == 23) {              
+                        entladeZeitenArrayVis = [];    
+                        entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis     
+                    };
+                }
             }
         }
         
@@ -736,7 +741,7 @@ async function processing() {
         console.error('-->  PV ' + _dc_now + ' Verbrauch ' + _verbrauchJetzt + ' Restladezeit ' + restladezeit + ' Restlademenge ' + restlademenge);
     }
 
-    if (batterieLadenUhrzeitStart && _hhJetzt >= batterieLadenUhrzeit && _dc_now > _verbrauchJetzt)  {    // laden übersteuern ab bestimmter uhrzeit und nur wenn genug pv
+    if (batterieLadenUhrzeitStart && _hhJetzt >= batterieLadenUhrzeit && _dc_now > _verbrauchJetzt)  {    // mit pv laden übersteuern ab bestimmter uhrzeit und nur wenn genug pv
         if (_debug) {
             console.warn('-->> übersteuert mit nach Uhrzeit laden');
         }
@@ -914,7 +919,7 @@ async function sendToWR(commWR, pwrAtCom) {
             }
 
             if (_debug) {
-                console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom);
+                console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom + ' _tibber_active_idx ' + _tibber_active_idx);
                 console.info('----------------------------------------------------------------------------------');
             }
         }
@@ -1361,11 +1366,11 @@ function tibber_active_auswertung() {
     switch (_tibber_active_idx) {
         case 0:       
             if (_dc_now < 10) {
-                const tibPoint =  getState(tibberDP + 'extra.tibberProtokoll').val;    // und diesen dann nehmen. bei tibber 0 dann macht der das was zueltzt gesendet worden ist
-                if (tibPoint == 0) {
+                const tiIdix =  getState(tibberDP + 'extra.tibberProtokoll').val;    // und diesen dann nehmen. bei tibber 0 dann macht der das was zueltzt gesendet worden ist
+                if (tiIdix == 0) {
                     _tibber_active_idx = 33;    
                 } else {
-                    _tibber_active_idx = tibPoint;
+                    _tibber_active_idx = tiIdix;
                 }
                 
                 tibber_active_auswertung();

@@ -24,7 +24,7 @@ const _influxDbMeasurementGarten    = 'pvforecast.0.plants.garten.power';
 const mainObject            = '0_userdata.0.strom.pvforecast';
 const mainObjectToday       = '0_userdata.0.strom.pvforecast.today';
 const mainObjectTomorrow    = '0_userdata.0.strom.pvforecast.tomorrow';
-const abbrechenBei          = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
+const _abbrechenBei         = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
 
 // pv_estimate   – Der Realist: Dies ist sozusagen die Standardvorhersage. Denk an ihn als den durchschnittlichen Wert, basierend auf den aktuellen Wetterdaten und Modellen. Er sagt uns, was wir in einem normalen Szenario erwarten können – weder zu optimistisch noch zu pessimistisch.
 // pv_estimate10 – Der Vorsichtige: Jetzt wird's interessant. Dieser Wert ist die 10. Perzentile, also eher auf der niedrigen Seite. Er sagt uns, dass es eine 90 %ige Chance gibt, dass die tatsächliche Leistung höher ausfällt. Wenn du also lieber auf Nummer sicher gehst und nicht gerne enttäuscht wirst, ist das dein Wert.
@@ -40,8 +40,8 @@ const _hours = 24;
 let _tickerAbholung = 0;
 let _errorMrk = false;
 
-let aufrufUrl   = '';
-let aufrufSeite = '';
+let _aufrufUrl   = '';
+let _aufrufSeite = '';
 
 // ------------------------------------------------------------------------------------------------------------------
 
@@ -58,16 +58,16 @@ schedule({ astro: 'sunrise' }, () => {
     initialPV();
 
     if (seite2.length > 0) {
-        aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        aufrufSeite = seite2;
-        toLog(`Hole PV ${aufrufSeite}`, true);
-        requestData(aufrufUrl, aufrufSeite);
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite2;
+        toLog(`Hole PV ${_aufrufSeite}`, true);
+        requestData(_aufrufUrl, _aufrufSeite);
     }
 
-    aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
-    aufrufSeite = seite1;
-    toLog(`Hole PV ${aufrufSeite}`, true);
-    requestData(aufrufUrl, aufrufSeite);
+    _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
+    _aufrufSeite = seite1;
+    toLog(`Hole PV ${_aufrufSeite}`, true);
+    requestData(_aufrufUrl, _aufrufSeite);
 
     _tickerAbholung = +1;
 });
@@ -75,9 +75,9 @@ schedule({ astro: 'sunrise' }, () => {
 
 schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben
     if (seite2.length > 0) {
-        aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        aufrufSeite = seite2;
-        requestData(aufrufUrl, aufrufSeite);
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite2;
+        requestData(_aufrufUrl, _aufrufSeite);
     }
 });
 
@@ -87,9 +87,9 @@ schedule('1 7,9,10 * * *', function () {
     const sunup = getState('javascript.0.variables.astro.sunrise').val;  
 
     if (_hhJetzt >= parseInt(sunup.slice(0, 2)) && seite2.length > 0) {  
-        aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        aufrufSeite = seite2;
-        requestData(aufrufUrl, aufrufSeite);
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite2;
+        requestData(_aufrufUrl, _aufrufSeite);
         _tickerAbholung = +1;
     }
 });
@@ -99,17 +99,17 @@ schedule('2 8,12,13,15 * * *', function () {
     const sunup = getState('javascript.0.variables.astro.sunrise').val;  
     
     if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {     
-        aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
-        aufrufSeite = seite1;
-        requestData(aufrufUrl, aufrufSeite);
+        _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite1;
+        requestData(_aufrufUrl, _aufrufSeite);
         _tickerAbholung = +1;
     }
 });
  
 schedule('5,10,15 * * * *', function () {
     if (_errorMrk) {
-        toLog(`ERROR - Hole PV ${aufrufSeite} ticker ${_tickerAbholung}`, true);
-        requestData(aufrufUrl, aufrufSeite);
+        toLog(`ERROR - Hole PV ${_aufrufSeite} ticker ${_tickerAbholung}`, true);
+        requestData(_aufrufUrl, _aufrufSeite);
         _tickerAbholung = +1;
     }
 });
@@ -144,7 +144,7 @@ function datenErzeugen(array, seite) {
     let heute           = true;
 
     for (let i = 0; i < array.length; i++) {                              
-        const endtime = Date.parse(array[i].period_end);
+        const endtime   = Date.parse(array[i].period_end);
         const startTime = new Date(endtime - 1800000);
 
         let wert1   = array[i].pv_estimate;
@@ -217,7 +217,7 @@ function datenErzeugen(array, seite) {
             const startTime     = starttt.toLocaleTimeString('de-DE', options);
             const endTime       = endtt.toLocaleTimeString('de-DE', options);
 
-            if (startTime == abbrechenBei) {   // wir brauchen nur bis nachts
+            if (startTime == _abbrechenBei) {   // wir brauchen nur bis nachts
                 if (schonGebucht) {
                     break;
                 }

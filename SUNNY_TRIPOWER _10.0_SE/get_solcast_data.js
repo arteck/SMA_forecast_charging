@@ -5,12 +5,15 @@ const options = { hour12: false, hour: '2-digit', minute: '2-digit' };
 
 const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, es werden summen Dp's angelegt   <<<<<<<<-----------------------------------  wichtig
 
-const seite1Key = "xxxx-xxxx-xxxx-xxxx";
-const seite2Key = "yyyy-yyyy-yyyy-yyyy";
 const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-const seite1    = 'garten';         // name dp1  frei wählbar  
-const seite2    = 'strasse';        // name dp2  frei wählbar
-const gesamt    = 'gesamt';        // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
+
+const seite1    = 'garten';                     // name dp1  frei wählbar  
+const seite1Key = "xxxx-xxxx-xxxx-xxxx";
+
+const seite2    = 'strasse';                    // name dp2  frei wählbar leer für nicht genutzt
+const seite2Key = "yyyy-yyyy-yyyy-yyyy";        // nicht ändern wenn nicht genutzt
+
+const gesamt    = 'gesamt';                     // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
 
 const _influxDb                     = true;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
 const  influxInstance               = 'influxdb.0';
@@ -18,12 +21,10 @@ const _influxDbMeasurementGesamt    = 'pvforecast.0.summary.power';
 const _influxDbMeasurementStrasse   = 'pvforecast.0.plants.strasse.power';
 const _influxDbMeasurementGarten    = 'pvforecast.0.plants.garten.power';
 
-
 const mainObject            = '0_userdata.0.strom.pvforecast';
 const mainObjectToday       = '0_userdata.0.strom.pvforecast.today';
 const mainObjectTomorrow    = '0_userdata.0.strom.pvforecast.tomorrow';
 const abbrechenBei          = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
-
 
 // pv_estimate   – Der Realist: Dies ist sozusagen die Standardvorhersage. Denk an ihn als den durchschnittlichen Wert, basierend auf den aktuellen Wetterdaten und Modellen. Er sagt uns, was wir in einem normalen Szenario erwarten können – weder zu optimistisch noch zu pessimistisch.
 // pv_estimate10 – Der Vorsichtige: Jetzt wird's interessant. Dieser Wert ist die 10. Perzentile, also eher auf der niedrigen Seite. Er sagt uns, dass es eine 90 %ige Chance gibt, dass die tatsächliche Leistung höher ausfällt. Wenn du also lieber auf Nummer sicher gehst und nicht gerne enttäuscht wirst, ist das dein Wert.

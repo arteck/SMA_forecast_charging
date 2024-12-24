@@ -1,8 +1,11 @@
+// @ts-ignore
 const moment = require('moment');
 const options = { hour12: false, hour: '2-digit', minute: '2-digit' };
 
-// zum ändern ab hier
+// welche javascript instanz wird genutzt, für diese muss in Einstellungen ASTRO Zeit generierung aktiviert sein 
+const javascriptI = 'javascript.0';    
 
+// zum ändern ab hier
 const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, es werden summen Dp's angelegt   <<<<<<<<-----------------------------------  wichtig
 
 const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
@@ -83,7 +86,8 @@ schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gü
 // 10 request sind frei bei solcast.com
 schedule('1 7,9,10 * * *', function () {
     const _hhJetzt  = getHH();
-    const sunup = getState('javascript.0.variables.astro.sunrise').val;  
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;
+    
     let seite = seite1;
     if (seite2.length > 0) { 
         seite = seite2;
@@ -99,7 +103,7 @@ schedule('1 7,9,10 * * *', function () {
 
 schedule('2 8,12,13,15 * * *', function () {
     const _hhJetzt            = getHH();
-    const sunup = getState('javascript.0.variables.astro.sunrise').val;  
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;
     
     if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {     
         _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;

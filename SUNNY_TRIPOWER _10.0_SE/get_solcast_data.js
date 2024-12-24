@@ -7,10 +7,10 @@ const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, e
 
 const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
 
-const seite1    = 'garten';                     // name dp1  frei wählbar  
+const seite1    = 'garten';                     // name dp1  frei wählbar, sonne vormittags 
 const seite1Key = "xxxx-xxxx-xxxx-xxxx";
 
-const seite2    = 'strasse';                    // name dp2  frei wählbar leer für nicht genutzt
+const seite2    = 'strasse';                    //name dp2  frei wählbar, sonne nachmittags, leer wenn nur eine Seite genutzt wird
 const seite2Key = "yyyy-yyyy-yyyy-yyyy";        // nicht ändern wenn nicht genutzt
 
 const gesamt    = 'gesamt';                     // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
@@ -29,8 +29,9 @@ const _abbrechenBei         = '00:00';   // ab wieviel Uhr kommt nix mehr, kann 
 // pv_estimate   – Der Realist: Dies ist sozusagen die Standardvorhersage. Denk an ihn als den durchschnittlichen Wert, basierend auf den aktuellen Wetterdaten und Modellen. Er sagt uns, was wir in einem normalen Szenario erwarten können – weder zu optimistisch noch zu pessimistisch.
 // pv_estimate10 – Der Vorsichtige: Jetzt wird's interessant. Dieser Wert ist die 10. Perzentile, also eher auf der niedrigen Seite. Er sagt uns, dass es eine 90 %ige Chance gibt, dass die tatsächliche Leistung höher ausfällt. Wenn du also lieber auf Nummer sicher gehst und nicht gerne enttäuscht wirst, ist das dein Wert.
 // pv_estimate90 – Der Optimist: Im Gegensatz zum pv_estimate10 zeigt uns der pv_estimate90 die sonnige Seite. Dieser Wert ist die 90. Perzentile – eine Art Best-Case-Szenario. Hier sagen die Daten, dass es nur eine 10 %ige Chance gibt, dass die Leistung diesen Wert überschreitet. Ideal, wenn du die Dinge gerne von der besten Seite betrachtest.​
-let prognose1      = 1;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
-let prognose2      = 0;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
+let prognose1              = 1;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
+let prognose2              = 0;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
+const ersteTagAbfrage      = seite2;   // wir brauchen morgends werte, welche Seite soll zuerst abgefragt werden
 
 //-------------------------------------------------------------
 
@@ -73,22 +74,24 @@ schedule({ astro: 'sunrise' }, () => {
 });
 
 
-schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben
-    if (seite2.length > 0) {
-        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = seite2;
-        requestData(_aufrufUrl, _aufrufSeite);
-    }
+schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben    
+    _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+    _aufrufSeite = ersteTagAbfrage;
+    requestData(_aufrufUrl, _aufrufSeite);
 });
 
 // 10 request sind frei bei solcast.com
 schedule('1 7,9,10 * * *', function () {
     const _hhJetzt  = getHH();
     const sunup = getState('javascript.0.variables.astro.sunrise').val;  
+    let seite = seite1;
+    if (seite2.length > 0) { 
+        seite = seite2;
+    }
 
     if (_hhJetzt >= parseInt(sunup.slice(0, 2)) && seite2.length > 0) {  
         _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = seite2;
+        _aufrufSeite = seite;
         requestData(_aufrufUrl, _aufrufSeite);
         _tickerAbholung = +1;
     }

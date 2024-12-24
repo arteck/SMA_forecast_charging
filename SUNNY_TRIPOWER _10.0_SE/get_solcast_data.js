@@ -78,7 +78,7 @@ schedule({ astro: 'sunrise' }, () => {
 
 
 schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben    
-    if (_tickerAbholung > 0) {     // wurde schon mal abgeholt
+    if (_tickerAbholung < 1) {     // wurde schon mal abgeholt
         _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
         _aufrufSeite = ersteTagAbfrage;
         requestData(_aufrufUrl, _aufrufSeite);

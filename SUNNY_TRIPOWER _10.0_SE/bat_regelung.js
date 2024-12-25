@@ -282,13 +282,18 @@ async function processing() {
     _istLadezeit = false;
     _istEntladezeit = false;
 
-    for (let h = 0; h < pvfc.length; h++) {                         // pvfc ist sortiert nach uhrzeit
-        if (compareTime(pvfc[h][3], pvfc[h][4], 'between')) {
+    for (let p = 0; p < pvfc.length; p++) {                         // pvfc ist sortiert nach uhrzeit
+        if (compareTime(pvfc[p][3], pvfc[p][4], 'between')) {
             _istLadezeit = true;
             if (_debug) {
                 console.warn('-->> Bingo ladezeit ');
             }
         }
+    }
+
+    // keine ladezeit aber trotzdemgenug sonne
+    if (pvfc.length < 2 && _dc_now > 0) {
+        _istLadezeit = true;
     }
 
     let toSundownhr                     = 0;
@@ -343,7 +348,7 @@ async function processing() {
 
     if (_tibberNutzenSteuerung) {  
         const nowHour               = _hhJetzt + ':' + _today.getMinutes();         
-    //    _tibber_active_idx          = 0;                                                        // initialisiere
+      // _tibber_active_idx          = 0;                                                        // initialisiere
 
         const tibberPreisHeute      = getState(tibberPvForcastDP).val;
         const tibberPoiAll          = await sortArrayByCurrentHour(tibberPreisHeute, true, _hhJetzt);  // sortiert ab jetzt
@@ -666,11 +671,11 @@ async function processing() {
 
         // starte die ladung
         if (starteLadungTibber) {
-    //        if (restladezeit == 0) {
-    //            if (_battIn > 0) {
-    //                restladezeit = aufrunden(2, (restlademenge / _battIn * _wr_efficiency));
-    //            } 
-    //        }                             
+        //        if (restladezeit == 0) {
+        //            if (_battIn > 0) {
+        //                restladezeit = aufrunden(2, (restlademenge / _battIn * _wr_efficiency));
+        //            } 
+        //        }                             
 
             for (let i = 0; i < ladeZeitenArray.length; i++) {                    
                 if (compareTime(ladeZeitenArray[i][1], ladeZeitenArray[i][2], 'between')) {           
@@ -765,7 +770,9 @@ async function processing() {
             console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');
         }        
    
-        if (_batsoc < 100 && pvfc.length > 0) {    
+       // if (_batsoc < 100 && pvfc.length > 0) { 
+        if (_batsoc < 100 && _istLadezeit) {
+
             let toSundownhrReduziert = 0;          
 
             if (restlademenge > 0) {                   
@@ -824,6 +831,10 @@ async function processing() {
                         _tibber_active_idx = 6;
                         await entladezeitEntscheidung();
                     }
+                    
+                    if (!_nurEntladestunden && _tibber_active_idx == 3) { // nur entladestunden aber nicht wenns geladen wird
+                        _tibber_active_idx = 23;
+                    }
 
                     // komme aus tibber laufzeit
                     tibber_active_auswertung();
@@ -873,11 +884,10 @@ async function processing() {
                     _max_pwr = _mindischrg;          
                 }
             }
-        }
+        } 
     }
-
-    // -----------------------------------  letzten 10 % langsam laden
-    if (_batsoc > 90 && _battIn > 0) {  
+      // -----------------------------------  letzten 10 % langsam laden
+    if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0) {  
         _max_pwr = _lastPercentageLoadWith;
 
         if (_debug) {

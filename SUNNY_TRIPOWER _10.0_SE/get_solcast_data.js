@@ -263,8 +263,13 @@ function datenErzeugen(array, seite) {
                 setState(stateBaseName1 + 'power', wertW1, true);
                 setState(stateBaseName1 + 'power90', wertW2, true);
                 
-                const powerWName2 = getState(stateBaseName2 + 'power').val;
-                const powerW90Name2 = getState(stateBaseName2 + 'power90').val;
+                let powerWName2   = 0;
+                let powerW90Name2 = 0;
+
+                if (seite2.length > 0) {
+                    powerWName2     = getState(stateBaseName2 + 'power').val;
+                    powerW90Name2   = getState(stateBaseName2 + 'power90').val;
+                }
 
                 wertW1Ges = wertW1 + powerWName2;
                 wertW2Ges = wertW2 + powerW90Name2;

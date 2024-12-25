@@ -18,7 +18,7 @@ const seite2Key = "yyyy-yyyy-yyyy-yyyy";        // nicht ändern wenn nicht genu
 
 const gesamt    = 'gesamt';                     // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
 
-const _influxDb                     = true;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
+const _influxDb                     = false;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
 const  influxInstance               = 'influxdb.0';
 const _influxDbMeasurementGesamt    = 'pvforecast.0.summary.power';
 const _influxDbMeasurementStrasse   = 'pvforecast.0.plants.strasse.power';
@@ -88,7 +88,7 @@ schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gü
 // 10 request sind frei bei solcast.com
 schedule('1 7,9,10 * * *', function () {
     const _hhJetzt  = getHH();
-    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
     
     let seite = seite1;
     if (seite2.length > 0) { 
@@ -105,7 +105,7 @@ schedule('1 7,9,10 * * *', function () {
 
 schedule('2 8,12,13,15 * * *', function () {
     const _hhJetzt            = getHH();
-    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
     
     if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {     
         _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
@@ -270,7 +270,7 @@ function datenErzeugen(array, seite) {
                 wertW2Ges = wertW2 + powerW90Name2;
             }
 
-            if (seite == seite2) {
+            if (seite == seite2 && seite2.length > 0) {
                 setState(stateBaseName2 + 'power', wertW1, true);
                 setState(stateBaseName2 + 'power90', wertW2, true);
 

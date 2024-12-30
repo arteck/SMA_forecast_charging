@@ -152,3 +152,20 @@ function isNumeric(n) {
     return !isNaN(parseFloat(n)) && isFinite(n);
 }
 
+function toLog(text, addTimestamp) {
+   // console.log(text);
+    var lines = getState('0_userdata.0.System.log').val;
+    lines = lines.split('<br>');
+    
+    if (addTimestamp) {
+        lines.unshift(getTimeAsString() + ': ' + text);
+    } else {
+        lines.unshift(text);
+    }
+    if (lines.length > 50) { 
+  //      lines.splice(0,1);
+        lines.pop();
+    }
+    setState('0_userdata.0.System.log', lines.join('<br>'), true);
+}
+

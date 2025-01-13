@@ -636,7 +636,7 @@ async function processing() {
                 }
 
                 if (!_istEntladezeit) {                     // Entladezeit reicht aus bis zum Sonnaufgang von oben
-                    await entladezeitEntscheidung();
+                    _tibber_active_idx = await entladezeitEntscheidung();
                     if (_tibber_active_idx == 23) {
                         entladeZeitenArrayVis = [];
                         entladeZeitenArrayVis.push([0.0,"--:--","--:--"]);  //  initialisiere für Vis     
@@ -822,7 +822,7 @@ async function processing() {
 
                     if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
                         _tibber_active_idx = 6;
-                        await entladezeitEntscheidung();
+                        _tibber_active_idx = await entladezeitEntscheidung(_tibber_active_idx);
                     }
 
                     if (!_nurEntladestunden && _tibber_active_idx == 3) { // nur entladestunden aber nicht wenns geladen wird
@@ -1098,7 +1098,8 @@ async function berechneVerbrauch() {
 }
 // ------------------------------------------- functions
 
-async function entladezeitEntscheidung() {
+async function entladezeitEntscheidung(idxIn = 0) {
+    let tibber_active_idx = idxIn;
 
     if (_debug) {
         console.info('_entladeZeitenArray in neu Berechnung ' +  _entladeZeitenArray.length + ' _nurEntladestunden ' + _nurEntladestunden);
@@ -1119,15 +1120,17 @@ async function entladezeitEntscheidung() {
                     console.warn('entladezeit ' + _entladeZeitenArray[c][1] + '  ' +  _entladeZeitenArray[c][2]);
                 }
                 _istEntladezeit = true;
-                _tibber_active_idx = 2;
+                tibber_active_idx = 2;
                 break;
             }
         }
     } else {
-        _tibber_active_idx = 23;
+        tibber_active_idx = 23;
         _entladeZeitenArray = [];
         _istEntladezeit = true;
     }
+
+    return tibber_active_idx;
 }
 
 async function filterZeitSunup(arrZeit, sunup) {

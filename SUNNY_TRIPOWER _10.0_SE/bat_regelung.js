@@ -329,7 +329,7 @@ async function processing() {
         console.info('Einspeisung_____________________ ' + aufrunden(2, _einspeisung) + ' W');
         console.info('PV Produktion___________________ ' + _dc_now + ' W');
         console.info('Batt_SOC________________________ ' + _batsoc + ' %');
-        const battsts = battStatus == 2291 ? 'Batterie Standby' : battStatus == 3664 ? 'Notladebetrieb' : battStatus == 2292 ? 'Batterie laden' : battStatus == 2293 ? 'Batterie entladen' : 'Aus';
+        const battsts = battStatus == 2291 ? 'Batterie: Standby' : battStatus == 3664 ? 'Notladebetrieb' : battStatus == 2292 ? 'Batterie: laden' : battStatus == 2293 ? 'Batterie: entladen' : 'Batterie: Aus';
         console.info('Batt_Status_____________________ ' + battsts + ' = ' + battStatus);
         console.info('Restladezeit____________________ ' + restladezeit + ' h');
         console.info('Restlademenge___________________ ' + restlademenge + ' Wh');
@@ -440,10 +440,8 @@ async function processing() {
             }
         }
 
-        hrsToRun     = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));
-        
-        nextDay = _hhJetzt > parseInt(_sundown.slice(0, 2));
-
+        hrsToRun    = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));       
+        nextDay     = _hhJetzt > parseInt(_sundown.slice(0, 2));
         toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, nextDay));
 
         if (_debug) {
@@ -561,8 +559,8 @@ async function processing() {
         _entladeZeitenArray         = [];
         let entladeZeitenArrayVis   = [];
 
-        // wenn garkeine ladezeiten vorhanden wie im winter
-        if (pvfc.length < 6) {            // wir brauchen min 3 Stunden Sonne
+        // im winter wenn keine oder sehr wenige ladezeiten (wenn überhaupt)
+        if (pvwhToday * _wr_efficiency < _batteryCapacity && _hhJetzt < parseInt(_sundown.slice(0, 2))) {
             _sunup = _maxHHOhnePV;
             if (_debug) {
                 console.error('keine ladestunden vorhanden sunup gesetzt auf : ' + _sunup);
@@ -1135,7 +1133,7 @@ async function entladezeitEntscheidung() {
 async function filterZeitSunup(arrZeit, sunup) {
     const newArray = [];
 
-    // console.warn(JSON.stringify(arrZeit));
+    //console.warn(JSON.stringify(arrZeit));
 
     for (let i = 0; i < arrZeit.length; i++) {
         const startTime = parseInt(arrZeit[i][1].split(':')[0]);

@@ -109,7 +109,6 @@ let _verbrauchJetzt             = 0;
 let _lastSpntCom                = 0;
 let _lastpwrAtCom               = 0;
 let _bydDirectSOC               = 5;
-let _bydDirectSOCMrk            = 0;
 let _batsoc                     = 0;
 let _max_pwr                    = _mindischrg;
 let _maxchrg                    = _mindischrg;
@@ -133,14 +132,14 @@ let _prognoseNutzenSteuerung            = true;    //wird _tibberNutzenAutomatis
 let _prognoseNutzenAutomatisch          = _prognoseNutzenSteuerung; //wird _prognoseNutzenAutomatisch benutzt
 let _batterieLadenUebersteuernManuell   = false;
 let _tomorrow_kW                        = 0;
-let _entladeZeitenArray                   = [];
+let _entladeZeitenArray                 = [];
 
 let _sunup              = '00:00';
 let _sunupAstro         = '00:00';
 let _sundown            = '00:00';
 let _sundownAstro       = '00:00';
 let _sunupTodayAstro    = '00:00';
-let _hhJetzt                   = getHH();
+let _hhJetzt            = getHH();
 
 createUserStates(userDataDP, false, [tibberStromDP + 'debug', { 'name': 'debug', 'type': 'boolean', 'read': true, 'write': true, 'role': 'state', 'def': false }], function () {
     setState(tibberDP + 'debug', _debug, true);
@@ -264,8 +263,6 @@ async function processing() {
         setState(tibberDP + 'extra.tibberProtokoll', 0, true);
         _tick = 0;
     }
-
-    _bydDirectSOCMrk = 0;
 
     // fülle den ertragsarray
     let pvfc                       = await getPvErtrag();             // gib mir den ertrag mit pvlimittierung               
@@ -560,7 +557,7 @@ async function processing() {
         let entladeZeitenArrayVis   = [];
 
         // im winter wenn keine oder sehr wenige ladezeiten (wenn überhaupt)
-        if (pvwhToday * _wr_efficiency < _batteryCapacity && _hhJetzt < parseInt(_sundown.slice(0, 2))) {
+        if (pvwhToday * _wr_efficiency < _batteryCapacity && _hhJetzt < parseInt(_sundown.slice(0, 2)) && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
             _sunup = _maxHHOhnePV;
             if (_debug) {
                 console.error('keine ladestunden vorhanden sunup gesetzt auf : ' + _sunup);
@@ -618,16 +615,16 @@ async function processing() {
             entladeZeitenArrayVis           = entladeZeitenArrayAll.arrOutOnlyHH;
 
             if (batlefthrs > 0 && _dc_now < _verbrauchJetzt && !starteLadungTibber) {
-                if (pvfc.length > 0) {                        // bekomme ich batterie aufgeladen  
+              //  if (pvfc.length > 0 && !_nurEntladestunden) {                               // bekomme ich batterie aufgeladen  
+                if (pvwhToday * _wr_efficiency < _batteryCapacity  && !_nurEntladestunden) {                                      
                     if (batlefthrs >= hrsToRun) {
                         if (_sunup != _maxHHOhnePV) {
-                            if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {        // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
+                            if (compareTime(nowHour, addMinutesToTime(_sunup, 30), 'between')) {    // wenn rest battlaufzeit > als bis zum sonnenaufgang oder sonnenaufgang + 30 min
                                 if (_debug) {
                                     console.warn('Entladezeit reicht aus bis zum Sonnaufgang');
                                 }
                                 _istEntladezeit = true;
                                 _tibber_active_idx = 22;
-                                _entladeZeitenArray = [];
                                 entladeZeitenArrayVis = [];
                                 entladeZeitenArrayVis.push([0.0,"99:99","--:--"]);  //  initialisiere für Vis
                             }
@@ -733,6 +730,7 @@ async function processing() {
 //      _tibber_active_idx = 5;                 starte die ladung
 //      _tibber_active_idx = 6;                 Entladung stoppen nutze nur Entladestunden 
 //      _tibber_active_idx = 88;                notladung
+//      _tibber_active_idx = 99;                manuelles laden aus anderen script
 
     if (_debug && !_batterieLadenUebersteuernManuell) {
         console.error('-->> Verlasse Tibber Sektion mit _SpntCom ' + _SpntCom + ' _max_pwr ' + _max_pwr + ' _tibber_active_idx ' + _tibber_active_idx);
@@ -1009,7 +1007,7 @@ async function vorVerarbeitung() {
     _notLadung = await notLadungCheck();
 
     if (_notLadung) {
-        _tibber_active_idx            = 88          // notladung mrk
+        _tibber_active_idx = 88                             // notladung mrk
         sendToWR(_InitCom_Aus, _batteryPowerEmergency);
     } else {
         await processing();
@@ -1023,11 +1021,8 @@ async function vorVerarbeitung() {
 
 async function notLadungCheck() {
     if (_bydDirectSOC < _bydSOCEmergency) {
-        if (_bydDirectSOC != _bydDirectSOCMrk) {
-            console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
-            toLog(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %', true);
-            _bydDirectSOCMrk = _bydDirectSOC;
-        }
+        console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
+        toLog(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %', true);  
         return true;
     }
     return false;
@@ -1100,6 +1095,7 @@ async function berechneVerbrauch() {
 
 async function entladezeitEntscheidung(idxIn = 0) {
     let tibber_active_idx = idxIn;
+    _istEntladezeit = false;
 
     if (_debug) {
         console.info('_entladeZeitenArray in neu Berechnung ' +  _entladeZeitenArray.length + ' _nurEntladestunden ' + _nurEntladestunden);
@@ -1108,16 +1104,17 @@ async function entladezeitEntscheidung(idxIn = 0) {
     if (_nurEntladestunden) {
         for (let c = 0; c < _entladeZeitenArray.length; c++) {
             if (_vehicleConsum > 0) {                           // wenn fahrzeug am laden dann aber nicht aus der batterie laden
+                tibber_active_idx = 6;
                 break;
             }
 
             if (_debug) {
-                console.warn('entladezeit alle' + JSON.stringify(_entladeZeitenArray[c]));
+                console.warn('entladezeit alle ' + JSON.stringify(_entladeZeitenArray[c]));
             }
 
             if (compareTime(_entladeZeitenArray[c][1], _entladeZeitenArray[c][2], "between")) {
                 if (_debug) {
-                    console.warn('entladezeit ' + _entladeZeitenArray[c][1] + '  ' +  _entladeZeitenArray[c][2]);
+                    console.warn('entladezeit gefunden ' + _entladeZeitenArray[c][1] + '  ' +  _entladeZeitenArray[c][2]);
                 }
                 _istEntladezeit = true;
                 tibber_active_idx = 2;

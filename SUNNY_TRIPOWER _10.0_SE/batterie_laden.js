@@ -6,13 +6,13 @@ const _batteryLadePowerMax  = 5000;                                 // max Batte
 let _wirdGeladen    = false;
 let _battLaden      = false;
 
-setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
-setState('0_userdata.0.strom.batterieLadenManuellForce', false); 
-setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);
+setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden, true);      
+setState('0_userdata.0.strom.batterieLadenManuellForce', false, true);      
+setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);      
 
 on({id: _triggerDP, change: 'ne'}, function() {  // aktualisiere laut adapter abfrageintervall   
-    let battSOC                 = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val;        
-          _battLaden            = getState('0_userdata.0.strom.batterieLadenManuellStart').val;
+        _battLaden              = getState('0_userdata.0.strom.batterieLadenManuellStart').val;
+    let battSOC                 = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val;                
     const tibberNutzenManuell   = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell').val;
     const tibberStartStunde     = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuellHH').val;
     const battSOCBis            = getState('0_userdata.0.strom.tibber.extra.tibberNutzenManuellProzent').val;
@@ -51,29 +51,28 @@ function processingLaden() {
     const battMaxLaden          = getState('0_userdata.0.strom.batterieLadenManuellForceWatt').val;
     const battSOC               = getState('modbus.0.inputRegisters.3.30845_Batterie_Prozent').val; 
 
-    let ladenMax = 0;
+    let ladenMax = pvWert - verbrauch;
                
     if (mitStromLaden) {
         ladenMax = battMaxLaden;
     } else {
-        ladenMax = pvWert - verbrauch;
-    }   
+        if (ladenMax < 10) {
+            ladenMax = 0;
+        }
+    }    
 
-    if (battMaxLaden > 1) {
+    if (ladenMax > 1) {
         if (battSOC >= 90) {
-            ladenMax = 500;    
+            ladenMax = 1000;    
         }
     }
-
-    if (ladenMax > 0 ) {    
-        ladungStart(ladenMax);   
-    } 
+    
+    ladungStart(ladenMax);   
     
     //console.warn('Starte Batterie Laden mit Tibber ladenMax ' + ladenMax); 
     setState('0_userdata.0.strom.batterieLadenManuellWert', ladenMax, true);
 
 }
-
 
 function processingOff() {
     toLog('Stoppe Batterie Laden manuell',true );
@@ -84,10 +83,10 @@ function processingOff() {
     _battLaden      = false;
     _wirdGeladen    = false;
 
-    setState('0_userdata.0.strom.batterieLadenManuellForce', _battLaden); 
-    setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', _battLaden);
-    setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);
-    setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden);
+    setState('0_userdata.0.strom.batterieLadenManuellForce', _battLaden, true);      
+    setState('0_userdata.0.strom.tibber.extra.tibberNutzenManuell', _battLaden, true);      
+    setState('0_userdata.0.strom.batterieLadenManuellWert', 0, true);      
+    setState('0_userdata.0.strom.batterieLadenManuellStart', _battLaden, true);      
 }
 
 function ladungStart(wert) {    
@@ -99,9 +98,10 @@ function ladungStart(wert) {
     if (wert > 0) {
         wert = wert * -1
     }
+    setState('0_userdata.0.strom.tibber.extra.tibberProtokoll', 99, true); 
     setState('modbus.0.holdingRegisters.3.40149_Wirkleistungvorgabe',wert);
-    setState('0_userdata.0.strom.tibber.extra.Batterieladung_jetzt', wert *-1, true);
-    setState('0_userdata.0.strom.tibber.extra.Batterieladung_soll', wert *-1, true);
+    setState('0_userdata.0.strom.tibber.extra.Batterieladung_jetzt', wert, true);
+    setState('0_userdata.0.strom.tibber.extra.Batterieladung_soll', wert, true);
 }
 
 function ladungStop() {

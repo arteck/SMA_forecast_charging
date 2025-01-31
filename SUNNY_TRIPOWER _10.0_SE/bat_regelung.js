@@ -34,7 +34,6 @@ const _batteryTarget            = 100;                                  // Gewü
 const _lastPercentageLoadWith   = -500;                                 // letzten 5 % laden mit xxx Watt
 const _baseLoad                 = 850;                                  // Grundverbrauch in Watt
 const _wr_efficiency            = 0.93;                                 // Batterie- und WR-Effizienz (e.g., 0.9 for Li-Ion, 0.8 for PB)
-const _batteryPowerEmergency    = -4000;                                // Ladeleistung der Batterie in W notladung
 const _bydSOCEmergency          = 6;                                    // Notladung anstossen bei SOC kleiner als
 const _mindischrg               = -1;                                   // min entlade W entweder 0 oder -1
 const _batteryLadePowerMax      = 5000;                                 // max Batterie ladung 
@@ -788,25 +787,29 @@ async function processing() {
                 if (_dc_now < verbrauchJetztOhneAuto ) {                             // kann sein dass die prognose nicht stimmt und wir haben ladezeiten aber draussen regnets
                     if (_debug) {
                         console.warn('-->> breche ab, da nicht genug Sonne ' );
-                        console.warn('-->> komme aber von oben mit _tibber_active_idx ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
                     }
 
-                    if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
-                        _tibber_active_idx = 6;
-                        _tibber_active_idx = await entladezeitEntscheidung(_tibber_active_idx);
+                    if (_tibberNutzenSteuerung) {
+                        if (_debug) {
+                            console.warn('-->> komme aber von oben mit _tibber_active_idx ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
+                        }
+
+                        if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
+                            _tibber_active_idx = 6;
+                            _tibber_active_idx = await entladezeitEntscheidung(_tibber_active_idx);
+                        }
+
+                        if (!_nurEntladestunden && _tibber_active_idx == 3) { // entladung stoppen
+                            _tibber_active_idx = 23;
+                        }
+
+                        // komme aus tibber laufzeit
+                        tibber_active_auswertung();
+
+                        if (_debug) {
+                            console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
+                        }
                     }
-
-                    if (!_nurEntladestunden && _tibber_active_idx == 3) { // entladung stoppen
-                        _tibber_active_idx = 23;
-                    }
-
-                    // komme aus tibber laufzeit
-                    tibber_active_auswertung();
-
-                    if (_debug) {
-                        console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
-                    }
-
                 } else {
 
                     if (_debug) {
@@ -873,30 +876,37 @@ async function processing() {
 async function sendToWR(commWR, pwrAtCom) {
     const commNow = await getStateAsync(spntComCheckDP);
 
-    if (_debug) {
-        console.error('_batterieLadenUebersteuernManuell ' + _batterieLadenUebersteuernManuell);
-        console.info(_lastpwrAtCom + ' != ' +pwrAtCom );
-        console.info(commWR + ' != ' + commNow.val);
-        console.info(commWR + ' != ' +  _lastSpntCom);
-    }
+    // wenn notladung mach alles aus
+    if (_tibber_active_idx == 88) {
+        if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
+            setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
+        }
+    } else {
+        if (_debug) {
+            console.error('_batterieLadenUebersteuernManuell ' + _batterieLadenUebersteuernManuell);
+            console.info(_lastpwrAtCom + ' != ' +pwrAtCom );
+            console.info(commWR + ' != ' + commNow.val);
+            console.info(commWR + ' != ' +  _lastSpntCom);
+        }
 
-    if (!_batterieLadenUebersteuernManuell) {
-        if (_tibberNutzenSteuerung || _prognoseNutzenSteuerung) {
-            if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom)) {
+        if (!_batterieLadenUebersteuernManuell) {
+            if (_tibberNutzenSteuerung || _prognoseNutzenSteuerung) {
+                if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom)) {
+                    if (_debug) {
+                        console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
+                    }
+                    setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);           // 40149_Wirkleistungvorgabe
+                    if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
+                        setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
+                    }
+                    setState(spntComCheckDP, commWR, true);                             // check DP für vis        
+                    setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
+                }
+
                 if (_debug) {
-                    console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
+                    console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom + ' _tibber_active_idx ' + _tibber_active_idx);
+                    console.info('----------------------------------------------------------------------------------');
                 }
-                setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);           // 40149_Wirkleistungvorgabe
-                if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
-                    setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
-                }
-                setState(spntComCheckDP, commWR, true);                             // check DP für vis        
-                setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
-            }
-
-            if (_debug) {
-                console.warn('SpntCom jetzt --> ' + commWR + ' <-- davor war ' + _lastSpntCom + ' und commNow ist ' + commNow.val + ' .. Wirkleistungvorgabe jetzt ' + pwrAtCom + ' davor war ' + _lastpwrAtCom + ' _tibber_active_idx ' + _tibber_active_idx);
-                console.info('----------------------------------------------------------------------------------');
             }
         }
     }
@@ -983,7 +993,7 @@ async function vorVerarbeitung() {
 
     if (_notLadung) {
         _tibber_active_idx = 88                             // notladung mrk
-        sendToWR(_InitCom_Aus, _batteryPowerEmergency);
+        sendToWR(_InitCom_Aus, 0);
     } else {
         await processing();
     }
@@ -1350,7 +1360,7 @@ function tibber_active_auswertung() {
             if (_dc_now < 2) {
                 const tiIdix =  getState(tibberDP + 'extra.tibberProtokoll').val;    // und diesen dann nehmen. bei tibber 0 dann macht der das was zueltzt gesendet worden ist
                 if (tiIdix == 0) {
-                    _tibber_active_idx = 33;
+                    _tibber_active_idx = 33;                    
                 } else {
                     _tibber_active_idx = tiIdix;
                 }
@@ -1378,7 +1388,7 @@ function tibber_active_auswertung() {
         case 22:                            //      _tibber_active_idx = 22;   Entladezeit reicht aus bis zum Sonnaufgang        
             _SpntCom = _InitCom_Aus;
             break;
-        case 23:                            //      _tibber_active_idx = 23;   keine entladezeit da alle Preise unter schwelle aber Batterie hat ladung
+        case 23:                            //      _tibber_active_idx = 23;   keine entladezeit da alle Preise unter schwelle aber Batterie hat ladung                                
             _SpntCom = _InitCom_Aus;
             break;
         case 3:                              //      _tibber_active_idx = 3;    entladung stoppen wenn preisschwelle erreicht        

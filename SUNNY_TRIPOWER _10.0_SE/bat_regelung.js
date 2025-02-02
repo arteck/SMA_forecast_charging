@@ -819,7 +819,7 @@ async function processing() {
                     if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
                         _max_pwr = _dc_now - verbrauchJetztOhneAuto;
 
-                        if (_tibber_active_idx == 5) {    // sind in der nachledezeit
+                        if (_tibber_active_idx == 5 && _tibberNutzenSteuerung) {    // sind in der nachledezeit
                             _max_pwr = _batteryLadePowerMax;
                         }
 
@@ -852,13 +852,14 @@ async function processing() {
                 }
             }
         }
-    }
-    // -----------------------------------  letzten 10 % langsam laden
-    if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0) {
-        _max_pwr = _lastPercentageLoadWith;
+    
+        // -----------------------------------  letzten 10 % langsam laden
+        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _max_pwr > _lastPercentageLoadWith) {
+            _max_pwr = _lastPercentageLoadWith;
 
-        if (_debug) {
-            console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
+            if (_debug) {
+                console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
+            }
         }
     }
 
@@ -910,7 +911,7 @@ async function sendToWR(commWR, pwrAtCom) {
             }
         }
     }
-
+    
     _lastSpntCom    = commWR;
     _lastpwrAtCom   = pwrAtCom;
 }
@@ -1377,6 +1378,9 @@ function tibber_active_auswertung() {
         case 1:                             //      _tibber_active_idx = 1;    Nachladezeit
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
+            if (_batsoc > 90) {            // limittiere die letzten 10 %
+                _max_pwr = _lastPercentageLoadWith;
+            }
             break;
         case 2:                             //      _tibber_active_idx = 2;    Entladezeiten
         case 20:                            //      _tibber_active_idx = 20;   pv reicht für den Tag und wir sind in zwischenzeit wo nix produziert wird und preis unter schwelle  
@@ -1401,6 +1405,9 @@ function tibber_active_auswertung() {
         case 5:                             //      _tibber_active_idx = 5;    starte die ladung
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
+            if (_batsoc > 90) {            // limittiere die letzten 10 %
+                _max_pwr = _lastPercentageLoadWith;
+            }
             break;
         case 6:                             //      _tibber_active_idx = 6;    stoppe entladung 
             _SpntCom = _InitCom_An;

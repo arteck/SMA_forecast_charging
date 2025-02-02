@@ -854,7 +854,7 @@ async function processing() {
         }
     
         // -----------------------------------  letzten 10 % langsam laden
-        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _max_pwr > _lastPercentageLoadWith) {
+        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _max_pwr < _lastPercentageLoadWith) {
             _max_pwr = _lastPercentageLoadWith;
 
             if (_debug) {

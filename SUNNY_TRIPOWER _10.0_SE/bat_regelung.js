@@ -334,9 +334,134 @@ async function processing() {
         _max_pwr    = (_dc_now - _verbrauchJetzt) * -1;   // vorbelegung zum laden     
     }
 
-    if (_tibberNutzenSteuerung) {
-        const nowHour               = _hhJetzt + ':' + _today.getMinutes();
+    
+    const nowHour               = _hhJetzt + ':' + _today.getMinutes();
 
+    _klimaLoad = 0;
+
+    if (_mitKlimaanlage) {
+        _istKlimaAn = getState(_klimaDP).val;
+
+        if (_istKlimaAn > 0 && _reduzierungStundenKlima > _sundownReduzierungStunden) {  // soll klima berückstichtigt werden dann nimm diese
+            sundownReduzierung = _reduzierungStundenKlima;
+        }
+
+        const tempWetter = getState(_wetterTemperaturDP).val;
+        if (tempWetter >= _tempWetterSoll) {
+            if (_dc_now < _verbrauchJetzt) {    // wenn pv grösser als der verbrauch ist.. dann nimm die zeiten ohne klima
+                _klimaLoad = _klimaVerbrauch;
+            }
+        }
+    }
+
+    let batlefthrs = aufrunden(2, (_batsoc * _batteryCapacity / 100) / (_verbrauchJetzt / Math.sqrt(_lossfactor)));    /// 12800 / 100 * 30  Batterielaufzeit laut SOC und berücksichtige Grundverbrauch         
+
+    setState(tibberDP + 'extra.Batterielaufzeit', getMinHours(batlefthrs), true);
+
+    //wieviel wh kommen in etwa von PV in den nächsten 24h
+    let hrsToRun        = 24;
+    let pvwhToday       = 0;
+    let pvwhTomorrow    = 0;
+
+    if (_pvforecastTodayArray.length > 0) {
+        for (let p = 0; p < hrsToRun * 2; p++) {   // *2 weil 48 PV Datenpunkte
+            pvwhToday   = pvwhToday + _pvforecastTodayArray[p][2] / 2;
+        }
+    }
+
+    if (_pvforecastTomorrowArray.length > 0) {
+        for (let p = 0; p < 48; p++) {   // *2 weil 48 PV Datenpunkte               
+            pvwhTomorrow    = pvwhTomorrow  + _pvforecastTomorrowArray[p][2] / 2;
+        }
+    }
+
+    if (_debug) {
+        console.info('mit Klimaanlage__________________' + _mitKlimaanlage + ' _klimaLoad '  +_klimaLoad);
+        console.info('Bat h verbleibend_____batlefthrs ' + batlefthrs);
+        console.info('Erwarte PV ca___________________ ' + aufrunden(2, pvwhToday / 1000) + ' kWh');
+        console.info('Erwarte PV morgen ca____________ ' + aufrunden(2, pvwhTomorrow / 1000) + ' kWh');
+    }
+
+    setState(tibberDP + 'extra.PV_Prognose', aufrunden(2, pvwhToday), true);
+
+    _sundown       = _sundownAstro;
+    _sunup         = _sunupTodayAstro;
+
+    let nextDay         = false;
+
+    if (!_snowmode) {
+        if (_pvforecastTodayArray.length > 0) {
+            if (pvfc.length > 0) {
+                _sundown = pvfc[(pvfc.length - 1)][4];
+            }
+
+            for (let su = 0; su < 48; su++) {
+                if (_pvforecastTodayArray[su][2] >= (_baseLoad + _klimaLoad)) {
+                    _sunup = _pvforecastTodayArray[su][0];
+                    break;
+                }
+            }
+        }
+
+        if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
+            for (let su = 0; su < 48; su++) {
+                if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {
+                    _sunup = _pvforecastTomorrowArray[su][0];
+                    nextDay = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    hrsToRun    = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));       
+    nextDay     = _hhJetzt > parseInt(_sundown.slice(0, 2));
+    toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, nextDay));
+
+    if (_debug) {
+        console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup);
+        console.warn('bis nächster Sonnenaufgang hrsToRun '  + hrsToRun + ' bis nächster Untergang toSundownhr ' + toSundownhr);
+        console.warn('pv stunden pvfc.length ' + pvfc.length);
+    }
+
+    if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {
+        pvwhToday = 0;                                              // initialisiere damit die entladung läuft
+        let t = 0;
+        if (toSundownhr > 0) {
+            //wieviel kwh kommen in etwa von PV ab jetzt
+            for (t = 0; t < pvfc.length; t++) {
+                pvwhToday = pvwhToday + pvfc[t][0];
+            }
+            pvwhToday = aufrunden(2, (pvwhToday /2));
+
+            setState(tibberDP + 'extra.PV_Prognose_kurz', pvwhToday, true);
+
+            if (_debug) {
+                console.info('Erwarte PV verkürzt ca__________ ' + aufrunden(2, pvwhToday / 1000) + ' kWh');
+                //  console.info('_pvforecastTodayArray : ' + JSON.stringify(_pvforecastTodayArray[p]));
+            }
+        }
+    }
+
+    let curbatwh            = aufrunden(2, ((_batteryCapacity / 100) * _batsoc));     // batterie ladung 
+
+    let pvWh                = pvwhToday;
+    if (compareTime(_sundown, '00:00', 'between')) {
+        pvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
+    }
+
+    // im winter wenn keine oder sehr wenige ladezeiten (wenn überhaupt) dann setzte _sunup aus mitternacht für später entladezeitenermittlung
+    if (pvwhToday * _wr_efficiency < _batteryCapacity && restladezeit > pvfc.length /2) { 
+    // if (pvwhToday * _wr_efficiency < _batteryCapacity && restladezeit > pvfc.length /2 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {    
+        _sunup = _maxHHOhnePV;
+        if (_debug) {
+            console.error('keine ladestunden vorhanden sunup gesetzt auf : ' + _sunup);
+        }
+    }
+
+    let lefthrs                 = Math.ceil(batlefthrs *2);                         // Batterielaufzeit laut SOC muss doppelt gerechnet werden da 30 min für tibber abgleich
+
+    if (_tibberNutzenSteuerung) {
         const tibberPreisHeute      = getState(tibberPvForcastDP).val;
         const tibberPoiAll          = await sortArrayByCurrentHour(tibberPreisHeute, true, _hhJetzt);  // sortiert ab jetzt
         const tibberPoihighSorted   = await sortArrayByCurrentHour(tibberPreisHeute, false, '00');     // sortiert ab 0 Uhr
@@ -345,132 +470,20 @@ async function processing() {
         //console.info('tibberPoihighSorted ' +  JSON.stringify(tibberPoihighSorted));
 
         let tibberPoilow = await tibberPoilowErmittlung(tibberPoihighSorted);
-
+    
         //console.info('tibberPoilow ' +  JSON.stringify(tibberPoilow));    
 
-        _klimaLoad = 0;
-
-        if (_mitKlimaanlage) {
-            _istKlimaAn = getState(_klimaDP).val;
-
-            if (_istKlimaAn > 0 && _reduzierungStundenKlima > _sundownReduzierungStunden) {  // soll klima berückstichtigt werden dann nimm diese
-                sundownReduzierung = _reduzierungStundenKlima;
-            }
-
-            const tempWetter = getState(_wetterTemperaturDP).val;
-            if (tempWetter >= _tempWetterSoll) {
-                if (_dc_now < _verbrauchJetzt) {    // wenn pv grösser als der verbrauch ist.. dann nimm die zeiten ohne klima
-                    _klimaLoad = _klimaVerbrauch;
-                }
-            }
-        }
-
-        let batlefthrs = aufrunden(2, (_batsoc * _batteryCapacity / 100) / (_verbrauchJetzt / Math.sqrt(_lossfactor)));    /// 12800 / 100 * 30  Batterielaufzeit laut SOC und berücksichtige Grundverbrauch         
-
-        setState(tibberDP + 'extra.Batterielaufzeit', getMinHours(batlefthrs), true);
-
-        //wieviel wh kommen in etwa von PV in den nächsten 24h
-        let hrsToRun        = 24;
-        let pvwhToday       = 0;
-        let pvwhTomorrow    = 0;
-
-        if (_pvforecastTodayArray.length > 0) {
-            for (let p = 0; p < hrsToRun * 2; p++) {   // *2 weil 48 PV Datenpunkte
-                pvwhToday   = pvwhToday + _pvforecastTodayArray[p][2] / 2;
-            }
-        }
-
-        if (_pvforecastTomorrowArray.length > 0) {
-            for (let p = 0; p < 48; p++) {   // *2 weil 48 PV Datenpunkte               
-                pvwhTomorrow    = pvwhTomorrow  + _pvforecastTomorrowArray[p][2] / 2;
-            }
-        }
-
-        if (_debug) {
-            console.info('mit Klimaanlage__________________' + _mitKlimaanlage + ' _klimaLoad '  +_klimaLoad);
-            console.info('Bat h verbleibend_____batlefthrs ' + batlefthrs);
-            console.info('Erwarte PV ca___________________ ' + aufrunden(2, pvwhToday / 1000) + ' kWh');
-            console.info('Erwarte PV morgen ca____________ ' + aufrunden(2, pvwhTomorrow / 1000) + ' kWh');
-        }
-
-        setState(tibberDP + 'extra.PV_Prognose', aufrunden(2, pvwhToday), true);
-
-        _sundown       = _sundownAstro;
-        _sunup         = _sunupTodayAstro;
-
-        let nextDay         = false;
-
-        if (!_snowmode) {
-            if (_pvforecastTodayArray.length > 0) {
-                if (pvfc.length > 0) {
-                    _sundown = pvfc[(pvfc.length - 1)][4];
-                }
-
-                for (let su = 0; su < 48; su++) {
-                    if (_pvforecastTodayArray[su][2] >= (_baseLoad + _klimaLoad)) {
-                        _sunup = _pvforecastTodayArray[su][0];
-                        break;
-                    }
-                }
-            }
-
-            if (_pvforecastTomorrowArray.length > 0 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {
-                for (let su = 0; su < 48; su++) {
-                    if (_pvforecastTomorrowArray[su][2] >= (_baseLoad + _klimaLoad)) {
-                        _sunup = _pvforecastTomorrowArray[su][0];
-                        nextDay = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        hrsToRun    = Number(await zeitDifferenzInStunden(nowHour, _sunup, nextDay));       
-        nextDay     = _hhJetzt > parseInt(_sundown.slice(0, 2));
-        toSundownhr = Number(await zeitDifferenzInStunden(nowHour, _sundown, nextDay));
-
-        if (_debug) {
-            console.info('Nachtfenster nach Berechnung : ' + _sundown + ' - ' + _sunup);
-            console.warn('bis nächster Sonnenaufgang hrsToRun '  + hrsToRun + ' bis nächster Untergang toSundownhr ' + toSundownhr);
-            console.warn('pv stunden pvfc.length ' + pvfc.length);
-        }
-
-        if (compareTime(_sunupTodayAstro, _sundownAstro, 'between')) {
-            pvwhToday = 0;                                              // initialisiere damit die entladung läuft
-            let t = 0;
-            if (toSundownhr > 0) {
-                //wieviel kwh kommen in etwa von PV ab jetzt
-                for (t = 0; t < pvfc.length; t++) {
-                    pvwhToday = pvwhToday + pvfc[t][0];
-                }
-                pvwhToday = aufrunden(2, (pvwhToday /2));
-
-                setState(tibberDP + 'extra.PV_Prognose_kurz', pvwhToday, true);
-
-                if (_debug) {
-                    console.info('Erwarte PV verkürzt ca__________ ' + aufrunden(2, pvwhToday / 1000) + ' kWh');
-                    //  console.info('_pvforecastTodayArray : ' + JSON.stringify(_pvforecastTodayArray[p]));
-                }
-            }
-        }
-
+        
         if (_debug) {
             console.info('Tibber tibberPoiAll.length ' + tibberPoiAll.length);
             //    console.info('tibberPoiAll vor nachladen: ' + JSON.stringify(tibberPoiAll));
         }
 
         // Nachladestunden Ermittlung
-        let starteLadungTibber  = false;
+        let starteLadungTibber  = false;       
+        let ladeZeitenArray     = [];        
         let prclow              = [];
         let prchigh             = [];
-        let ladeZeitenArray     = [];
-
-        let curbatwh            = aufrunden(2, ((_batteryCapacity / 100) * _batsoc));     // batterie ladung 
-
-        let pvWh                = pvwhToday;
-        if (compareTime(_sundown, '00:00', 'between')) {
-            pvWh = pvwhTomorrow;              // vor 00:00 brauchen wir den morgen wert
-        }
 
         if (batlefthrs < hrsToRun) {
             for (let h = 0; h < tibberPoiAll.length; h++) {
@@ -543,18 +556,7 @@ async function processing() {
 
         _entladeZeitenArray         = [];
         let entladeZeitenArrayVis   = [];
-
-        // im winter wenn keine oder sehr wenige ladezeiten (wenn überhaupt) dann setzte _sunup aus mitternacht für später entladezeitenermittlung
-        if (pvwhToday * _wr_efficiency < _batteryCapacity && restladezeit > pvfc.length /2) { 
-        // if (pvwhToday * _wr_efficiency < _batteryCapacity && restladezeit > pvfc.length /2 && _hhJetzt > parseInt(_sunup.slice(0, 2))) {    
-            _sunup = _maxHHOhnePV;
-            if (_debug) {
-                console.error('keine ladestunden vorhanden sunup gesetzt auf : ' + _sunup);
-            }
-        }
-
-        let tibberPoihigh           = await filterZeitSunup(tibberPoiAll, _sunup);      // sortiert nach preis und stunden grösser jetzt und bis zu sunup oder 14 uhr
-        let lefthrs                 = Math.ceil(batlefthrs *2);                         // Batterielaufzeit laut SOC muss doppelt gerechnet werden da 30 min für tibber abgleich
+        let tibberPoihigh           = await filterZeitSunup(tibberPoiAll, _sunup);      // sortiert nach preis und stunden grösser jetzt und bis zu sunup oder 14 uhr        
 
         if (_debug) {
             console.info('tibberPoihigh.length '+ tibberPoihigh.length);

@@ -122,7 +122,7 @@ let _notLadung                  = false;
 
 
 // für tibber
-let _tibberNutzenSteuerung      = true;                 //      soll tibber genutzt werden
+let _tibberNutzenSteuerung      = false;                 //      soll tibber genutzt werden
 let _tibberNutzenAutomatisch    = _tibberNutzenSteuerung;
 let _tibberPreisJetzt           = getState(tibberPreisJetztDP).val;
 
@@ -1366,6 +1366,10 @@ function tibber_active_auswertung() {
                     _tibber_active_idx = tiIdix;
                 }
 
+                if (!_tibberNutzenSteuerung) {
+                    _tibber_active_idx = 2;     
+                }
+
                 tibber_active_auswertung();
                 break;
             }
@@ -1378,7 +1382,7 @@ function tibber_active_auswertung() {
         case 1:                             //      _tibber_active_idx = 1;    Nachladezeit
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
-            if (_batsoc > 90) {            // limittiere die letzten 10 %
+            if (_batsoc > 90) {             // limittiere die letzten 10 %
                 _max_pwr = _lastPercentageLoadWith;
             }
             break;
@@ -1389,23 +1393,23 @@ function tibber_active_auswertung() {
         case 21:
             _SpntCom = _InitCom_Aus;
             break;
-        case 22:                            //      _tibber_active_idx = 22;   Entladezeit reicht aus bis zum Sonnaufgang        
+        case 22:                             //      _tibber_active_idx = 22;   Entladezeit reicht aus bis zum Sonnaufgang        
             _SpntCom = _InitCom_Aus;
             break;
-        case 23:                            //      _tibber_active_idx = 23;   keine entladezeit da alle Preise unter schwelle aber Batterie hat ladung                                
+        case 23:                             //      _tibber_active_idx = 23;   keine entladezeit da alle Preise unter schwelle aber Batterie hat ladung                                
             _SpntCom = _InitCom_Aus;
             break;
         case 3:                              //      _tibber_active_idx = 3;    entladung stoppen wenn preisschwelle erreicht        
         case 33:                             //      _tibber_active_idx = 33;   wie 3 nur kommend von intern
             _SpntCom = _InitCom_An;
             break;
-        case 4:                             //      _tibber_active_idx = 4;    ladung stoppen wenn Restladezeit kleiner Billigstromzeitfenster
+        case 4:                              //      _tibber_active_idx = 4;    ladung stoppen wenn Restladezeit kleiner Billigstromzeitfenster
             _SpntCom = _InitCom_An;
             break;
-        case 5:                             //      _tibber_active_idx = 5;    starte die ladung
+        case 5:                              //      _tibber_active_idx = 5;    starte die ladung
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
-            if (_batsoc > 90) {            // limittiere die letzten 10 %
+            if (_batsoc > 90) {              // limittiere die letzten 10 %
                 _max_pwr = _lastPercentageLoadWith;
             }
             break;

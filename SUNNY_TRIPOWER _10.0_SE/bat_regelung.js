@@ -284,7 +284,7 @@ async function processing() {
         }
     }
 
-    // keine ladezeit aber trotzdemgenug sonne
+    // keine ladezeit aber trotzdem genug sonne
     if (pvfc.length < 2 && _dc_now > 0) {
         _istLadezeit = true;
     }
@@ -777,64 +777,64 @@ async function processing() {
             if (_dc_now < _verbrauchJetzt && _tibber_active_idx == 0) {
                 _max_pwr = _mindischrg;
             }
+            
+            _SpntCom = _InitCom_An;
 
-            if (_istLadezeit) {
-                _SpntCom = _InitCom_An;
+            if (_debug) {
+                console.warn('-->> Bingo ladezeit 2 ' + ' Fahrzeug zieht ' + _vehicleConsum);
+                console.info('-->> _powerReduzierung um ' + _powerReduzierung + ' _power90Reduzierung um ' + _power90Reduzierung);
+            }
 
+            if (_dc_now < verbrauchJetztOhneAuto ) {                             // kann sein dass die prognose nicht stimmt und wir haben ladezeiten aber draussen regnets
                 if (_debug) {
-                    console.warn('-->> Bingo ladezeit 2 ' + ' Fahrzeug zieht ' + _vehicleConsum);
-                    console.info('-->> _powerReduzierung um ' + _powerReduzierung + ' _power90Reduzierung um ' + _power90Reduzierung);
+                    console.warn('-->> breche ab, da nicht genug Sonne ' );
                 }
 
-                if (_dc_now < verbrauchJetztOhneAuto ) {                             // kann sein dass die prognose nicht stimmt und wir haben ladezeiten aber draussen regnets
+                if (_tibberNutzenSteuerung) {
                     if (_debug) {
-                        console.warn('-->> breche ab, da nicht genug Sonne ' );
+                        console.warn('-->> komme aber von oben mit _tibber_active_idx ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
                     }
 
-                    if (_tibberNutzenSteuerung) {
-                        if (_debug) {
-                            console.warn('-->> komme aber von oben mit _tibber_active_idx ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
-                        }
+                    if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
+                        _tibber_active_idx = 6;
+                        _tibber_active_idx = await entladezeitEntscheidung(_tibber_active_idx);
+                    }
 
-                        if (_nurEntladestunden && _tibber_active_idx != 5) { // nur entladestunden aber nicht wenns geladen wird
-                            _tibber_active_idx = 6;
-                            _tibber_active_idx = await entladezeitEntscheidung(_tibber_active_idx);
-                        }
+                    if (!_nurEntladestunden && _tibber_active_idx == 3) { // entladung stoppen
+                        _tibber_active_idx = 23;
+                    }
 
-                        if (!_nurEntladestunden && _tibber_active_idx == 3) { // entladung stoppen
-                            _tibber_active_idx = 23;
-                        }
+                    // komme aus tibber laufzeit
+                    tibber_active_auswertung();
 
-                        // komme aus tibber laufzeit
-                        tibber_active_auswertung();
-
-                        if (_debug) {
-                            console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
-                        }
+                    if (_debug) {
+                        console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
                     }
                 } else {
+                    _SpntCom = _InitCom_Aus; // wir haben keinen tibber also ist es egal
+                }
+            } else {
+
+                if (_debug) {
+                    console.warn('-->> mit überschuss _max_pwr ' + _max_pwr);
+                }
+
+                if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
+                    _max_pwr = _dc_now - verbrauchJetztOhneAuto;
+
+                    if (_tibber_active_idx == 5 && _tibberNutzenSteuerung) {    // sind in der nachledezeit
+                        _max_pwr = _batteryLadePowerMax;
+                    }
 
                     if (_debug) {
-                        console.warn('-->> mit überschuss _max_pwr ' + _max_pwr);
+                        console.warn('-->> nicht genug PV, limmitiere auf ' + _max_pwr);
                     }
+                }
 
-                    if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
-                        _max_pwr = _dc_now - verbrauchJetztOhneAuto;
+                _max_pwr = _max_pwr * -1;
 
-                        if (_tibber_active_idx == 5 && _tibberNutzenSteuerung) {    // sind in der nachledezeit
-                            _max_pwr = _batteryLadePowerMax;
-                        }
-
-                        if (_debug) {
-                            console.warn('-->> nicht genug PV, limmitiere auf ' + _max_pwr);
-                        }
-                    }
-
-                    _max_pwr = _max_pwr * -1;
-
-                    if (_lastpwrAtCom != _max_pwr) {
-                        _lastSpntCom = 95;                                          // damit der WR auf jedenfall daten bekommt
-                    }
+                if (_lastpwrAtCom != _max_pwr) {
+                    _lastSpntCom = 95;                                          // damit der WR auf jedenfall daten bekommt
                 }
             }
 

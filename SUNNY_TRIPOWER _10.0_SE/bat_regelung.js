@@ -256,7 +256,7 @@ async function processing() {
     _tick ++;
 
     if (_tick >= 30 && !_batterieLadenUebersteuernManuell) {       // alle 6= 1 min ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
-        setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);        // schreibe irgendwas da rein.. 
+        setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1);        // schreibe irgendwas da rein.. 
         setState(tibberDP + 'extra.tibberProtokoll', 0, true);
         _tibber_active_idx = 0;
         _tick = 0;
@@ -746,16 +746,18 @@ async function processing() {
             let toSundownhrReduziert = 0;
 
             if (restlademenge > 0) {
-                toSundownhrReduziert = toSundownhr;
-                if (toSundownhr > sundownReduzierung) {
-                    toSundownhrReduziert = toSundownhr - sundownReduzierung;
+                if (restlademenge > 500) {
+                    toSundownhrReduziert = toSundownhr;
+                    if (toSundownhr > sundownReduzierung) {
+                        toSundownhrReduziert = toSundownhr - sundownReduzierung;
+                    }
+
+                    _max_pwr = Math.max(Math.round(restlademenge / toSundownhrReduziert), 500);
+                    
+                } else {
+                    _max_pwr = Math.round(_dc_now - _verbrauchJetzt);  
                 }
 
-                _max_pwr = Math.max(Math.round(restlademenge / toSundownhrReduziert), 0);
-
-                if (_max_pwr == 0) {
-                    _max_pwr= Math.round(restlademenge / toSundownhrReduziert)
-                }
             } else {
                 _max_pwr = Math.ceil(pvfc[0][0]);
             }
@@ -769,7 +771,7 @@ async function processing() {
             setState(tibberDP + 'extra.Batterieladung_soll', _max_pwr, true);
 
             if (_debug) {
-                console.info('Ausgabe :_max_pwr ' + _max_pwr + ' ist ladezeit ' + _istLadezeit);
+                console.info('_max_pwr ' + _max_pwr + ' ladezeit ' + _istLadezeit);
             }
 
             const verbrauchJetztOhneAuto = _verbrauchJetzt - _vehicleConsum;
@@ -830,11 +832,11 @@ async function processing() {
                         console.warn('-->> nicht genug PV, limmitiere auf ' + _max_pwr);
                     }
                 }
-
+          
                 _max_pwr = _max_pwr * -1;
 
                 if (_lastpwrAtCom != _max_pwr) {
-                    _lastSpntCom = 95;                                          // damit der WR auf jedenfall daten bekommt
+                    setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1);       // damit der WR auf jedenfall daten bekommt
                 }
             }
 
@@ -856,12 +858,15 @@ async function processing() {
         }
     
         // -----------------------------------  letzten 10 % langsam laden
-        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _max_pwr < _lastPercentageLoadWith) {
-            _max_pwr = _lastPercentageLoadWith;
 
-            if (_debug) {
-                console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
-            }
+        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _istLadezeit) {
+            if (_max_pwr < _lastPercentageLoadWith) {
+                _max_pwr = _lastPercentageLoadWith;
+
+                if (_debug) {
+                    console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
+                }
+            } 
         }
     }
 
@@ -883,13 +888,11 @@ async function sendToWR(commWR, pwrAtCom) {
     if (_tibber_active_idx == 88) {
         if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
             setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
+            setState(spntComCheckDP, commWR, true);
         }
     } else {
         if (_debug) {
-            console.error('_batterieLadenUebersteuernManuell ' + _batterieLadenUebersteuernManuell);
-            console.info(_lastpwrAtCom + ' != ' +pwrAtCom );
-            console.info(commWR + ' != ' + commNow.val);
-            console.info(commWR + ' != ' +  _lastSpntCom);
+            console.error('sendToWR _batterieLadenUebersteuernManuell ' + _batterieLadenUebersteuernManuell);
         }
 
         if (!_batterieLadenUebersteuernManuell) {
@@ -898,11 +901,13 @@ async function sendToWR(commWR, pwrAtCom) {
                     if (_debug) {
                         console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
                     }
+
                     setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);           // 40149_Wirkleistungvorgabe
                     if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
                         setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
+                        setState(spntComCheckDP, commWR, true);
                     }
-                    setState(spntComCheckDP, commWR, true);                             // check DP für vis        
+                          
                     setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
                 }
 

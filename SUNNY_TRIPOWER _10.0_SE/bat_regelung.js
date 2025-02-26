@@ -256,7 +256,7 @@ async function processing() {
     _tick ++;
 
     if (_tick >= 30 && !_batterieLadenUebersteuernManuell) {       // alle 6= 1 min ticks reset damit der WR die Daten bekommt, WR ist auf 10 min reset Eingestellt
-        setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1);        // schreibe irgendwas da rein.. 
+        setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);       // schreibe irgendwas da rein.. 
         setState(tibberDP + 'extra.tibberProtokoll', 0, true);
         _tibber_active_idx = 0;
         _tick = 0;
@@ -836,7 +836,7 @@ async function processing() {
                 _max_pwr = _max_pwr * -1;
 
                 if (_lastpwrAtCom != _max_pwr) {
-                    setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1);       // damit der WR auf jedenfall daten bekommt
+                    setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);       // damit der WR auf jedenfall daten bekommt
                 }
             }
 

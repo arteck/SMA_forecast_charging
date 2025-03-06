@@ -1432,3 +1432,10 @@ function tibber_active_auswertung() {
 on({id: tibberDP + 'extra.nutzeNurEntladezeiten', change: 'ne'}, async function() {
     setState(tibberDP + 'extra.tibberProtokoll', 0, true);
 });
+
+on({id: tibberDP + 'extra.prognoseNutzenAutomatisch', change: 'ne', val:false}, async function() {
+    setState(communicationRegisters.fedInSpntCom, _InitCom_Aus);
+    setState(spntComCheckDP, _InitCom_Aus, true);
+    setState(tibberDP + 'extra.tibberProtokoll', 0, true);
+});
+

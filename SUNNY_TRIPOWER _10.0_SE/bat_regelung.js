@@ -700,6 +700,7 @@ async function processing() {
         await tibber_active_auswertung();
     } else {
         _tibber_active_idx = await entladezeitEntscheidung();
+        await tibber_active_auswertung();
     }
 
     setState(tibberDP + 'extra.tibberProtokoll', _tibber_active_idx, true);

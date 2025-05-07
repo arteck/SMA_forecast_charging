@@ -28,14 +28,13 @@ let _debug = getState(tibberDP + 'debug').val == null ? false : getState(tibberD
 const _InitCom_Aus              = 803;
 const _InitCom_An               = 802;
 
-const _pvPeak                   = 13170;                                // PV-Anlagenleistung in Wp
 const _batteryCapacity          = 12800;                                // Netto Batterie Kapazität in Wh BYD 2.56 pro Modul
 const _batteryTarget            = 100;                                  // Gewünschtes Ladeziel der Regelung (e.g., 85% for lead-acid, 100% for Li-Ion)
-const _lastPercentageLoadWith   = -500;                                 // letzten 5 % laden mit xxx Watt
+const _lastPercentageLoadWith   = -800;                                 // letzten 5 % laden mit xxx Watt
 const _baseLoad                 = 850;                                  // Grundverbrauch in Watt
 const _wr_efficiency            = 0.93;                                 // Batterie- und WR-Effizienz (e.g., 0.9 for Li-Ion, 0.8 for PB)
-const _bydSOCEmergency          = 6;                                    // Notladung anstossen bei SOC kleiner als
-const _mindischrg               = -1;                                   // min entlade W entweder 0 oder -1
+const _bydSOCEmergency          = 5;                                    // Notladung anstossen bei SOC kleiner als
+const _mindischrg               = 0;                                    // min entlade W entweder 0 oder -1
 const _batteryLadePowerMax      = 5000;                                 // max Batterie ladung 
 const _lossfactor               = 0.75;                                 // System gesamtverlust in % (Lade+Entlade Effizienz)
 const _pwrAtCom_def             = _batteryLadePowerMax * (253 / 230);   // max power bei 253V = 5500 W
@@ -45,6 +44,7 @@ const _loadfact                 = 1 / _lossfactor;                      // 1,33
 let   _istLadezeit              = false;                                // ladezeit gefunden merker
 let   _istEntladezeit           = false;                                // Entladezeit gefunden merker
 let   _nurEntladestunden        = false;                                // nutze nur entladestuden 
+let   _netzbezug                = 0;
 
 // manuelles reduzieren der PV um x Watt
 let     _powerReduzierung           = 0;                                    // manuelles reduzieren der pv prognose pro stunde bewölkt
@@ -107,7 +107,8 @@ let _SpntCom                    = _InitCom_Aus;
 let _verbrauchJetzt             = 0;
 let _lastSpntCom                = 0;
 let _lastpwrAtCom               = 0;
-let _bydDirectSOC               = 5;
+let _bydDirectSOC               = 0;
+let _mrkBattNotladung           = 0;
 let _batsoc                     = 0;
 let _max_pwr                    = _mindischrg;
 let _maxchrg                    = _mindischrg;
@@ -298,6 +299,7 @@ async function processing() {
     let battStatus                      = getState(inputRegisters.betriebszustandBatterie).val;
 
     _batteryLadePower                   = _batteryLadePowerMax;
+    _mrkBattNotladung                   = 0;
 
     if (_battIn > 0) {
         _batteryLadePower =_battIn;
@@ -701,9 +703,7 @@ async function processing() {
     } else {
         _tibber_active_idx = await entladezeitEntscheidung();
         await tibber_active_auswertung();
-    }
-
-    setState(tibberDP + 'extra.tibberProtokoll', _tibber_active_idx, true);
+    }    
 
     // ----------------------------------------------------  Start der PV Prognose Sektion
 
@@ -724,7 +724,8 @@ async function processing() {
 
     if (_debug && !_batterieLadenUebersteuernManuell) {
         console.error('-->> Verlasse Tibber Sektion mit _SpntCom ' + _SpntCom + ' _max_pwr ' + _max_pwr + ' _tibber_active_idx ' + _tibber_active_idx);
-        console.error('-->> _istEntladezeit ' + _istEntladezeit + ' _istLadezeit ' + _istLadezeit);
+        console.error('-->> _istEntladezeit ' + _istEntladezeit);
+        console.error('-->> _istLadezeit    ' + _istLadezeit);
         console.error('-->  PV ' + _dc_now + ' Verbrauch ' + _verbrauchJetzt + ' Restladezeit ' + restladezeit + ' Restlademenge ' + restlademenge);
     }
 
@@ -739,12 +740,9 @@ async function processing() {
     if (_prognoseNutzenSteuerung && _dc_now > 0) {
         if (_debug) {
             console.error('--> Starte prognose Nutzen Steuerung ');
-        }
-
-        if (_debug) {
             console.info('Abschluss PV bis ' + pvBis);
             console.info('pvfc.length ' + pvfc.length);
-            console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');
+            console.info('sundownReduzierung um ' + sundownReduzierung + ' Stunden');            
         }
 
         if (_batsoc < 100 && _istLadezeit) {
@@ -780,7 +778,11 @@ async function processing() {
                 console.info('_max_pwr ' + _max_pwr + ' ladezeit ' + _istLadezeit);
             }
 
-            const verbrauchJetztOhneAuto = _verbrauchJetzt - _vehicleConsum;
+            let verbrauchJetztOhneAuto = _verbrauchJetzt;
+
+            if (_considerVehicle) {
+                verbrauchJetztOhneAuto = _verbrauchJetzt - _vehicleConsum;
+            }
 
             if (_dc_now < _verbrauchJetzt && _tibber_active_idx == 0) {
                 _max_pwr = _mindischrg;
@@ -813,18 +815,31 @@ async function processing() {
                     }
 
                     // komme aus tibber laufzeit
-                    tibber_active_auswertung();
+                    await tibber_active_auswertung();
 
                     if (_debug) {
                         console.warn('-->> neuermittlung ' + _tibber_active_idx + ' mit SOC ' + _batsoc);
                     }
-                } else {
-                    _SpntCom = _InitCom_Aus; // wir haben keinen tibber also ist es egal
+                } else {                  
+                    _SpntCom = _InitCom_Aus; // wir haben keinen tibber also ist es egal kannst entladen ausser wenn auto dran hängt        
+                    
+                    if (_debug) {
+                        console.warn('-->> keine Tibber Nutzung kann also entalden werden ' + _SpntCom);
+                    }
+                    
+                    //oder phase abfragen evcc.0.loadpoint.1.status.phasesActive > 1          
+                    if (_vehicleConsum > 1) {
+                        _SpntCom = _InitCom_An;                               
+                        if (_debug) {
+                            console.warn('-->> aber Fahrzeug ist dran und lädt ' + _SpntCom);
+                        }
+                    }
+                    
                 }
             } else {
 
                 if (_debug) {
-                    console.warn('-->> mit überschuss _max_pwr ' + _max_pwr);
+                    console.warn('-->> mit überschuss _max_pwr ' + _max_pwr + ' ' + _lastPercentageLoadWith);
                 }
 
                 if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
@@ -839,7 +854,7 @@ async function processing() {
                     }
                 }
           
-                _max_pwr = _max_pwr * -1;
+                _max_pwr = _max_pwr * -1;                
 
                 if (_lastpwrAtCom != _max_pwr) {
                     setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);       // damit der WR auf jedenfall daten bekommt
@@ -865,7 +880,7 @@ async function processing() {
     
         // -----------------------------------  letzten 10 % langsam laden
 
-        if (_max_pwr != _mindischrg &&_batsoc > 90 && _battIn > 0 && _istLadezeit) {
+        if (_batsoc > 90 && _battIn > 0 && _istLadezeit) {
             if (_max_pwr < _lastPercentageLoadWith) {
                 _max_pwr = _lastPercentageLoadWith;
 
@@ -873,10 +888,16 @@ async function processing() {
                     console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
                 }
             } 
+        }        
+
+        if (_debug) {
+            console.error('-->> Verlasse prognoseNutzenSteuerung mit ' + _max_pwr + ' _netzbezug ' + _netzbezug );
         }
+        
+        _max_pwr = _max_pwr + _netzbezug;
     }
 
-    _maxchrg = _max_pwr;
+    _maxchrg = _max_pwr;    
 
 // ---------------------------------------------------- Ende der PV Prognose Sektion
 
@@ -889,6 +910,7 @@ async function processing() {
 
 async function sendToWR(commWR, pwrAtCom) {
     const commNow = await getStateAsync(spntComCheckDP);
+    setState(tibberDP + 'extra.tibberProtokoll', _tibber_active_idx, true);
 
     // wenn notladung mach alles aus
     if (_tibber_active_idx == 88) {
@@ -913,7 +935,7 @@ async function sendToWR(commWR, pwrAtCom) {
                         setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
                         setState(spntComCheckDP, commWR, true);
                     }
-                          
+                            
                     setState(tibberDP + 'extra.Batterieladung_jetzt', pwrAtCom, true);
                 }
 
@@ -924,7 +946,6 @@ async function sendToWR(commWR, pwrAtCom) {
             }
         }
     }
-    
     _lastSpntCom    = commWR;
     _lastpwrAtCom   = pwrAtCom;
 }
@@ -979,7 +1000,7 @@ async function vorVerarbeitung() {
     _notLadung = await notLadungCheck();
 
     if (_notLadung) {
-        _tibber_active_idx = 88                             // notladung mrk
+        _tibber_active_idx = 88                             // notladung mrk        
         sendToWR(_InitCom_Aus, 0);
     } else {
         await processing();
@@ -993,9 +1014,12 @@ async function vorVerarbeitung() {
 
 async function notLadungCheck() {
     if (_dc_now < _verbrauchJetzt) {
-        if (_bydDirectSOC < _bydSOCEmergency) {
-            console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
-            toLog(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %', true);  
+        if (_bydDirectSOC < _bydSOCEmergency && _batsoc == 0) {
+            if (_mrkBattNotladung != _bydDirectSOC) {
+                console.error(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %' + ' um ' + _hhJetzt + ':00');
+                toLog(' -----------------    Batterie NOTLADEN ' + _bydDirectSOC + ' %', true);  
+                _mrkBattNotladung = _bydDirectSOC;
+            }
             return true;
         }
     }
@@ -1039,13 +1063,13 @@ async function berechneVerbrauch() {
     const battIn        = await getStateAsync(inputRegisters.battIn);
     _battIn             = battIn.val;
     const netzbezug     = await getStateAsync(inputRegisters.netzbezug);
+    _netzbezug          = netzbezug.val
 
-    _vehicleConsum = 0;
+    _vehicleConsum = getState(vehicleConsumDP).val;
 
     if (_considerVehicle) {
         _isVehicleConn = getState(isVehicleConnDP).val;
         if (_isVehicleConn) {
-            _vehicleConsum  = getState(vehicleConsumDP).val;
             let evccModus   = getState(evccModusDP).val;
 
             if (_vehicleConsum < 0 || _vehicleConsum > _max_VehicleConsum) {            // sollte murks vom adapter kommen dann setze auf 0
@@ -1058,7 +1082,7 @@ async function berechneVerbrauch() {
         }
     }
 
-    const verbrauchJetzt   = (_dc_now + _battOut + netzbezug.val) - (_einspeisung + _battIn);       // verbrauch in W , 100W reserve obendruaf _vehicleConsum nicht rein nehmen
+    const verbrauchJetzt   = (_dc_now + _battOut + _netzbezug) - (_einspeisung + _battIn);       // verbrauch in W , 100W reserve obendruaf _vehicleConsum nicht rein nehmen
 
     const verbrauchVis = (verbrauchJetzt - _vehicleConsum);
     setState(momentan_VerbrauchDP, aufrunden(2, verbrauchVis /1000), true);                                // für die darstellung können die 100 W wieder raus und fahrzeug auch
@@ -1432,7 +1456,10 @@ on({id: '0_userdata.0.wohnung.rollo.steuerung.gutenNacht', change: 'ne', val: tr
     }
 });    
 
-on({ id: inputRegisters.triggerDP, change: 'ne' }, async function () {  // aktualisiere laut adapter abfrageintervall
+on({ id: inputRegisters.triggerDP, change: 'ne' }, async function (obj) {  // aktualisiere laut adapter abfrageintervall
+    const ti = obj.state.ts;
+    setState('0_userdata.0.strom.aktualisierung', ti, true);
+    
     setTimeout(async function() {
         await vorVerarbeitung();
     }, 500);

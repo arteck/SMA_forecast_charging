@@ -833,13 +833,12 @@ async function processing() {
                         if (_debug) {
                             console.warn('-->> aber Fahrzeug ist dran und lädt ' + _SpntCom);
                         }
-                    }
-                    
+                    }   
                 }
             } else {
 
                 if (_debug) {
-                    console.warn('-->> mit überschuss _max_pwr ' + _max_pwr + ' ' + _lastPercentageLoadWith);
+                    console.warn('-->> mit überschuss _max_pwr ' + _max_pwr);
                 }
 
                 if (_max_pwr > (_dc_now - verbrauchJetztOhneAuto) && _max_pwr > _mindischrg) {                   // wenn das ermittelte wert grösser ist als die realität dann limmitiere, check nochmal besser ist es
@@ -852,59 +851,51 @@ async function processing() {
                     if (_debug) {
                         console.warn('-->> nicht genug PV, limmitiere auf ' + _max_pwr);
                     }
-                }
-          
-                _max_pwr = _max_pwr * -1;                
-
-                if (_lastpwrAtCom != _max_pwr) {
-                    setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);       // damit der WR auf jedenfall daten bekommt
-                }
-            }
-
-            if (_batsoc < 91 && _max_pwr > _mindischrg) {
-                let max_pwrReserve = _max_pwr + _max_pwr * 0.05;    // 5 % reserve damit kein bezug aus dem netz bei schwankung
-
-                if (_dc_now < max_pwrReserve) {
-                    _max_pwr = _max_pwr - _max_pwr * 0.05;          // 5 % reserve damit kein bezug aus dem netz bei schwankung
-                }
-
-                if (_debug) {
-                    console.info('nach Berechnung 5% ' + _max_pwr);
-                }
-
-                if (_max_pwr > 0) {        // hier muss immer was negatives rauskommen.. sonst keine pv ladung
-                    _max_pwr = _mindischrg;
-                }
+                }                                  
             }
         }
     
         // -----------------------------------  letzten 10 % langsam laden
 
         if (_batsoc > 90 && _battIn > 0 && _istLadezeit) {
-            if (_max_pwr < _lastPercentageLoadWith) {
-                _max_pwr = _lastPercentageLoadWith;
-
-                if (_debug) {
-                    console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);
-                }
+            if (_max_pwr > _lastPercentageLoadWith) {
+                _max_pwr = _lastPercentageLoadWith;                    
             } 
-        }        
+            
+            if (_max_pwr < _lastPercentageLoadWith && _dc_now > _verbrauchJetzt) {
+                _max_pwr = _lastPercentageLoadWith;                    
+            }
+
+            if (_debug) {
+                console.warn('-->> limmitiere letzte 10 % auf ' + _max_pwr);    
+            }
+        }      
 
         if (_debug) {
             console.error('-->> Verlasse prognoseNutzenSteuerung mit ' + _max_pwr + ' _netzbezug ' + _netzbezug );
         }
         
-        _max_pwr = _max_pwr + _netzbezug;
+        if ((_max_pwr - _netzbezug) > 0) {
+            _max_pwr = _max_pwr - _netzbezug;   // wenn trotzdem bezug dann ziehe den ab
+        }
+
+        if (_max_pwr != 0) {        
+            _max_pwr = _max_pwr * -1; 
+        }
     }
 
-    _maxchrg = _max_pwr;    
+    _maxchrg = aufrunden(0, _max_pwr);    
+
+    if (_lastpwrAtCom != _maxchrg) {
+        setState(spntComCheckDP, Math.floor(Math.random() * 100) + 1, true);       // damit der WR auf jedenfall daten bekommt
+    }
 
 // ---------------------------------------------------- Ende der PV Prognose Sektion
 
 
 // ----------------------------------------------------           write WR data
 
-    sendToWR(_SpntCom, aufrunden(0, _maxchrg));
+    sendToWR(_SpntCom, _maxchrg);
 }
 
 
@@ -925,13 +916,13 @@ async function sendToWR(commWR, pwrAtCom) {
 
         if (!_batterieLadenUebersteuernManuell) {
             if (_tibberNutzenSteuerung || _prognoseNutzenSteuerung) {
-                if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom)) {
-                    if (_debug) {
-                        console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
-                    }
-
-                    setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);           // 40149_Wirkleistungvorgabe
+                if ((_lastpwrAtCom != pwrAtCom || commWR != commNow.val || commWR != _lastSpntCom)) {                    
                     if (commWR == _InitCom_An || commWR == _InitCom_Aus) {              // sende nur gültigen Wert
+                        if (_debug) {
+                            console.error('------ > Daten gesendet an WR kommunikation : ' + commWR  + ' Wirkleistungvorgabe ' + pwrAtCom);
+                        }
+
+                        setState(communicationRegisters.fedInPwrAtCom, pwrAtCom);       // 40149_Wirkleistungvorgabe
                         setState(communicationRegisters.fedInSpntCom, commWR);          // 40151_Kommunikation
                         setState(spntComCheckDP, commWR, true);
                     }
@@ -1393,7 +1384,7 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
             if (_batsoc > 90) {             // limittiere die letzten 10 %
-                _max_pwr = _lastPercentageLoadWith;
+                _max_pwr = _lastPercentageLoadWith * -1;
             }
             break;
         case 2:                             //      _tibber_active_idx = 2;    Entladezeiten
@@ -1420,7 +1411,7 @@ function tibber_active_auswertung() {
             _SpntCom = _InitCom_An;
             _max_pwr = _pwrAtCom_def * -1;
             if (_batsoc > 90) {              // limittiere die letzten 10 %
-                _max_pwr = _lastPercentageLoadWith;
+                _max_pwr = _lastPercentageLoadWith * -1;
             }
             break;
         case 6:                             //      _tibber_active_idx = 6;    stoppe entladung 

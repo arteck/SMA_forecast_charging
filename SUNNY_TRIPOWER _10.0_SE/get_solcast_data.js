@@ -1,582 +1,660 @@
+// ====================================================================================
+//  ioBroker Script: Solcast PV-Prognose Abruf & Datenpunkt-Verwaltung
+//  Version: 2.0 | Erneuert: 2026-03
+//
+//  Funktionsübersicht:
+//   - Solcast API Abruf (bis zu 10 Gratis-Requests/Tag) für 1 oder 2 PV-Seiten
+//   - Prognose-Werte: realistisch / vorsichtig (10P) / optimistisch (90P)
+//   - Datenpunkte: heute + morgen je 48 × 30-min-Slots (power, power90)
+//   - Gesamtberechnung beider Seiten (gesamt-DP)
+//   - Tagesertrag-Summierung in kWh (today_kW / tomorrow_kW)
+//   - InfluxDB-Export für Grafana-Diagramme (optional)
+//   - VIS Material-Design Bar-Chart JSON-Graph
+//   - Prognosebasiertes Aktivieren/Deaktivieren der Batterieladesteuerung
+//
+//  Solcast-Prognose-Typen:
+//   pv_estimate   = Realist  (Standardwert, 50. Perzentile)
+//   pv_estimate10 = Vorsicht (10. Perzentile – 90% Chance auf höhere Leistung)
+//   pv_estimate90 = Optimist (90. Perzentile – Best-Case Szenario)
+// ====================================================================================
+
+// @ts-nocheck
+'use strict';
+
+// ------------------------------------------------------------------------------------
+//  KONFIGURATION  ← hier alle Anpassungen vornehmen
+// ------------------------------------------------------------------------------------
+
+/** @type {object} Solcast API Zugangsdaten & PV-Anlagen-Konfiguration */
+const CFG = {
+    // Solcast API
+    apiKey:         'xxx',   // Solcast API Key
+    baseUrl:        'https://api.solcast.com.au/rooftop_sites/',
+
+    // PV-Seite 1 (z.B. Süddach, Garten – Sonne vormittags)
+    seite1:         'garten',                   // Name frei wählbar → Datenpunkt-Suffix
+    seite1Key:      'xxxx',      // Solcast Rooftop-Site-ID
+
+    // PV-Seite 2 (z.B. Norddach, Straße – Sonne nachmittags)
+    // Leer lassen ('') wenn nur eine PV-Seite vorhanden
+    seite2:         'strasse',
+    seite2Key:      'xxxx',
+
+    // Gesamtdatenpunkt-Name (Summe beider Seiten)
+    // Muss in ladenNachPrognose übereinstimmen wenn geändert
+    gesamt:         'gesamt',
+
+    // Prognose-Modus pro Seite: 0=realistisch | 1=vorsichtig (10P) | 2=optimistisch (90P)
+    prognose1:      1,      // Seite 1: vorsichtig
+    prognose2:      0,      // Seite 2: realistisch
+
+    // Datenpunkte einmalig anlegen:
+    // summeDpAnlegen auf true setzen, Script einmal starten, dann wieder auf false!
+    summeDpAnlegen: false,
+
+    // InfluxDB Export (für Grafana)
+    influxAktiv:    true,               // false = kein Export
+    influxInstanz:  'influxdb.0',
+    influxGesamt:   'pvforecast.0.summary.power',
+    influxSeite1:   'pvforecast.0.plants.garten.power',
+    influxSeite2:   'pvforecast.0.plants.strasse.power',
+
+    // Schwellenwert: unter pvMin kWh → Prognosebasiertes Laden deaktivieren
+    pvMin:          25,                 // kWh
+
+    // JavaScript-Instanz (muss ASTRO-Zeit-Generierung aktiviert haben)
+    javascriptInstanz: 'javascript.0',
+
+    // Interner Zeitstempel ab dem "heute" endet und "morgen" beginnt
+    abbrechenBei:   '00:00',           // nicht ändern
+};
+
+/** @type {object} Datenpunkt-Basispfade */
+const DP = {
+    base:           '0_userdata.0.strom.pvforecast',
+    today:          '0_userdata.0.strom.pvforecast.today',
+    tomorrow:       '0_userdata.0.strom.pvforecast.tomorrow',
+    userDataBase:   '0_userdata.0',
+    tibberBase:     '0_userdata.0.strom.tibber.',
+    pvTodayGesamt:  '0_userdata.0.strom.pvforecast.today.gesamt.',
+    battLadenUhrzeitStart: '0_userdata.0.strom.batterieLadenUhrzeitStart',
+};
+
+// ------------------------------------------------------------------------------------
+//  LAUFZEITVARIABLEN
+// ------------------------------------------------------------------------------------
+
 // @ts-ignore
-const moment = require('moment');
-const options = { hour12: false, hour: '2-digit', minute: '2-digit' };
+const moment        = require('moment');
+const TIME_OPTIONS  = { hour12: false, hour: '2-digit', minute: '2-digit' };
+const SLOTS_PER_DAY = 48;       // 24h × 2 (30-min-Intervalle)
 
-// welche javascript instanz wird genutzt, für diese muss in Einstellungen ASTRO Zeit generierung aktiviert sein 
-const javascriptI = 'javascript.0';    
+let _tickerAbholung = 0;        // Zähler: wie oft heute schon abgeholt wurde
+let _errorMrk       = false;    // Flag: letzter Request war fehlerhaft
+let _aufrufUrl      = '';       // Letzte Request-URL (für Error-Retry)
+let _aufrufSeite    = '';       // Letzte abgerufene Seite (für Error-Retry)
 
-// zum ändern ab hier
-const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, es werden summen Dp's angelegt   <<<<<<<<-----------------------------------  wichtig
+// ------------------------------------------------------------------------------------
+//  SCHEDULES (Abruf-Zeitplan)
+// ------------------------------------------------------------------------------------
 
-const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-
-const seite1    = 'garten';                     // name dp1  frei wählbar, sonne vormittags 
-const seite1Key = "xxxx-xxxx-xxxx-xxxx";
-
-const seite2    = 'strasse';                    //name dp2  frei wählbar, sonne nachmittags, leer wenn nur eine Seite genutzt wird
-const seite2Key = "yyyy-yyyy-yyyy-yyyy";        // nicht ändern wenn nicht genutzt
-
-const gesamt    = 'gesamt';                     // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
-
-const _influxDb                     = false;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
-const  influxInstance               = 'influxdb.0';
-const _influxDbMeasurementGesamt    = 'pvforecast.0.summary.power';
-const _influxDbMeasurementStrasse   = 'pvforecast.0.plants.strasse.power';
-const _influxDbMeasurementGarten    = 'pvforecast.0.plants.garten.power';
-
-const mainObject            = '0_userdata.0.strom.pvforecast';
-const mainObjectToday       = '0_userdata.0.strom.pvforecast.today';
-const mainObjectTomorrow    = '0_userdata.0.strom.pvforecast.tomorrow';
-const _abbrechenBei         = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
-
-// pv_estimate   – Der Realist: Dies ist sozusagen die Standardvorhersage. Denk an ihn als den durchschnittlichen Wert, basierend auf den aktuellen Wetterdaten und Modellen. Er sagt uns, was wir in einem normalen Szenario erwarten können – weder zu optimistisch noch zu pessimistisch.
-// pv_estimate10 – Der Vorsichtige: Jetzt wird's interessant. Dieser Wert ist die 10. Perzentile, also eher auf der niedrigen Seite. Er sagt uns, dass es eine 90 %ige Chance gibt, dass die tatsächliche Leistung höher ausfällt. Wenn du also lieber auf Nummer sicher gehst und nicht gerne enttäuscht wirst, ist das dein Wert.
-// pv_estimate90 – Der Optimist: Im Gegensatz zum pv_estimate10 zeigt uns der pv_estimate90 die sonnige Seite. Dieser Wert ist die 90. Perzentile – eine Art Best-Case-Szenario. Hier sagen die Daten, dass es nur eine 10 %ige Chance gibt, dass die Leistung diesen Wert überschreitet. Ideal, wenn du die Dinge gerne von der besten Seite betrachtest.​
-let prognose1              = 1;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
-let prognose2              = 0;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
-const ersteTagAbfrage      = seite2;   // wir brauchen morgends werte, welche Seite soll zuerst abgefragt werden
-
-//-------------------------------------------------------------
-
-const _baseUrl = "https://api.solcast.com.au/rooftop_sites/";
-const _hours = 24;
-
-let _tickerAbholung = 0;
-let _errorMrk = false;
-
-let _aufrufUrl   = '';
-let _aufrufSeite = '';
-
-// ------------------------------------------------------------------------------------------------------------------
-
-//                       zum testen
-//const testDaten = getState(`${mainObject}.response`).val;
-//datenErzeugen(JSON.parse(testDaten), seite2);
-
-//  initialisiere einmal in den nacht um 2 Uhr
+/** Zähler bei Sonnenuntergang zurücksetzen */
 schedule({ astro: 'sunset' }, () => {
     _tickerAbholung = 0;
 });
 
+/**
+ * Sonnenaufgang: Datenpunkte initialisieren und ersten Tagesabruf starten.
+ * Wird nur ausgeführt wenn Sonnenaufgang nach 06:00 Uhr (Winterschutz).
+ */
 schedule({ astro: 'sunrise' }, () => {
+    const hh = getHH();
     initialPV();
 
-    if (seite2.length > 0) {
-        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = seite2;
-        toLog(`Hole PV ${_aufrufSeite}`, true);
-        requestData(_aufrufUrl, _aufrufSeite);
-    }
-
-    _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
-    _aufrufSeite = seite1;
-    toLog(`Hole PV ${_aufrufSeite}`, true);
-    requestData(_aufrufUrl, _aufrufSeite);
-
-    _tickerAbholung = +1;
-});
-
-
-schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben    
-    if (_tickerAbholung < 1) {     // wurde schon mal abgeholt
-        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = ersteTagAbfrage;
-        requestData(_aufrufUrl, _aufrufSeite);
+    if (hh > 6) {
+        _requestBeideSeiten('Sonnenaufgang');
+        _tickerAbholung++;
     }
 });
 
-// 10 request sind frei bei solcast.com
-schedule('1 7,9,10 * * *', function () {
-    const _hhJetzt  = getHH();
-    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
-    
-    let seite = seite1;
-    if (seite2.length > 0) { 
-        seite = seite2;
-    }
-
-    if (_hhJetzt >= parseInt(sunup.slice(0, 2)) && seite2.length > 0) {  
-        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = seite;
-        requestData(_aufrufUrl, _aufrufSeite);
-        _tickerAbholung = +1;
+/** 06:01 Uhr: Frühester Abruf für Tageswerte (Fallback wenn Sonnenaufgang vor 06:00) */
+schedule('1 6 * * *', () => {
+    if (_tickerAbholung < 1) {
+        _requestSeite(CFG.seite2Key, CFG.seite2.length > 0 ? CFG.seite2 : CFG.seite1, '06:01 Fallback');
     }
 });
 
-schedule('2 8,12,13,15 * * *', function () {
-    const _hhJetzt            = getHH();
-    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
-    
-    if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {     
-        _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
-        _aufrufSeite = seite1;
-        requestData(_aufrufUrl, _aufrufSeite);
-        _tickerAbholung = +1;
+/**
+ * 07:01, 09:01, 10:01 Uhr: Seite 2 aktualisieren (nachmittags-PV).
+ * Nur wenn Sonnenaufgang bereits war und Seite 2 konfiguriert ist.
+ * Solcast: 10 kostenlose Requests/Tag → gezielter Einsatz.
+ */
+schedule('1 7,9,10 * * *', () => {
+    if (CFG.seite2.length === 0) return;
+
+    const sunup = _getSunriseHour();
+    if (getHH() >= sunup) {
+        _requestSeite(CFG.seite2Key, CFG.seite2, '07/09/10 Uhr Seite2');
+        _tickerAbholung++;
     }
 });
- 
-schedule('5,10,15 * * * *', function () {
+
+/** 08:02, 12:02, 13:02, 15:02 Uhr: Seite 1 aktualisieren (vormittags-PV). */
+schedule('2 8,12,13,15 * * *', () => {
+    const sunup = _getSunriseHour();
+    if (getHH() >= sunup) {
+        _requestSeite(CFG.seite1Key, CFG.seite1, '08/12/13/15 Uhr Seite1');
+        _tickerAbholung++;
+    }
+});
+
+/** Alle 5/10/15 Minuten: Error-Retry falls letzter Request fehlgeschlagen. */
+schedule('5,10,15 * * * *', () => {
     if (_errorMrk) {
-        toLog(`ERROR - Hole PV ${_aufrufSeite} ticker ${_tickerAbholung}`, true);
+        toLog(`[PV] ERROR-Retry: ${_aufrufSeite} (Versuch ${_tickerAbholung})`, true);
         requestData(_aufrufUrl, _aufrufSeite);
-        _tickerAbholung = +1;
+        _tickerAbholung++;
     }
 });
- 
-// ------------------------------------------------------------------------------------------------------------------
 
-/*************** ab hier nix ändern  ***************************** */
+// ------------------------------------------------------------------------------------
+//  API ABRUF
+// ------------------------------------------------------------------------------------
 
-async function requestData(seiteUrl, seite) {
-    const url = `${_baseUrl}${seiteUrl}`;   
+/**
+ * Ruft beide PV-Seiten sequentiell ab (seite2 zuerst, dann seite1).
+ * @param {string} [grund=''] - Bezeichnung für das Log
+ */
+function _requestBeideSeiten(grund) {
+    if (CFG.seite2.length > 0) {
+        _requestSeite(CFG.seite2Key, CFG.seite2, grund + ' Seite2');
+    }
+    _requestSeite(CFG.seite1Key, CFG.seite1, grund + ' Seite1');
+}
+
+/**
+ * Baut die URL zusammen und startet den HTTP-Request.
+ * @param {string} siteKey   - Solcast Rooftop-Site-ID
+ * @param {string} seite     - Seiten-Name für Datenpunkt-Routing
+ * @param {string} [grund=''] - Bezeichnung für das Log
+ */
+function _requestSeite(siteKey, seite, grund) {
+    _aufrufUrl   = `${siteKey}/forecasts?format=json&api_key=${CFG.apiKey}`;
+    _aufrufSeite = seite;
+    toLog(`[PV] Hole Prognose: ${seite}${grund ? ' (' + grund + ')' : ''}`, true);
+    requestData(_aufrufUrl, seite);
+}
+
+/**
+ * Führt den eigentlichen HTTP-GET gegen die Solcast API durch.
+ * Bei Fehler: _errorMrk setzen für automatischen Retry.
+ * Bei Erfolg: Raw-Response speichern und datenErzeugen() aufrufen.
+ *
+ * @param {string} seiteUrl - URL-Suffix (SiteKey + Parameter)
+ * @param {string} seite    - Seiten-Name für Datenpunkt-Routing
+ */
+function requestData(seiteUrl, seite) {
+    const url = `${CFG.baseUrl}${seiteUrl}`;
     _errorMrk = false;
 
-    httpGet(url, { timeout: 9000, responseType: 'text' }, async (err, response) => {
+    httpGet(url, { timeout: 9000, responseType: 'text' }, (err, response) => {
         if (err) {
             _errorMrk = true;
-            console.error(err);           
-        } else {           
-            const jsonData  = JSON.parse(response.data);
-            const array     = jsonData.forecasts;
-            
-            setState(`${mainObject}.response`, JSON.stringify(array), true);
+            console.error(`[PV] HTTP-Fehler bei ${seite}: ${err}`);
+            return;
+        }
 
-            datenErzeugen(array, seite);       
-        };
+        try {
+            const jsonData = JSON.parse(response.data);
+            setState(`${DP.base}.response`, JSON.stringify(jsonData), true);
+            datenErzeugen(jsonData.forecasts, seite);
+        } catch (parseErr) {
+            _errorMrk = true;
+            console.error(`[PV] JSON-Parse-Fehler bei ${seite}: ${parseErr}`);
+        }
     });
 }
 
-// --------------------------------------------------------------------
+// ------------------------------------------------------------------------------------
+//  DATENVERARBEITUNG
+// ------------------------------------------------------------------------------------
 
+/**
+ * Verarbeitet die Solcast API-Antwort und schreibt die Werte in die Datenpunkte.
+ * Unterscheidet automatisch ob ein Slot zu "heute" oder "morgen" gehört.
+ *
+ * @param {Array}  array - Solcast forecasts-Array
+ * @param {string} seite - Seiten-Name ('garten' oder 'strasse')
+ */
 function datenErzeugen(array, seite) {
-    const list          = [];  
-    let heute           = true;
-
-    for (let i = 0; i < array.length; i++) {                              
-        const endtime   = Date.parse(array[i].period_end);
-        const startTime = new Date(endtime - 1800000);
-
-        let wert1   = array[i].pv_estimate;
-        let wert2   = array[i].pv_estimate;
-
-        switch(prognose1) {
-            case 1:
-                wert1 = array[i].pv_estimate10;
-                break;
-            case 2:
-                wert1 = array[i].pv_estimate90;
-                break;
-            default:
-                // nix
-        } 
-
-        switch(prognose2) {
-            case 1:
-                wert2 = array[i].pv_estimate10;
-                break;
-            case 2:
-                wert2 = array[i].pv_estimate90;
-                break;
-            default:
-                // nix
-        } 
-
-        list[i] = {
-            starttime: startTime / 1000,
-            endtime: endtime / 1000,
-            wert1: Math.round(wert1 * 1000),
-            wert2: Math.round(wert2 * 1000),
-        };
-
-     //   console.warn('list ' + JSON.stringify(list));
+    if (!array || array.length === 0) {
+        console.warn(`[PV] Kein Daten-Array für ${seite}`);
+        return;
     }
 
-    const startTime = new Date(list[0].starttime * 1000);
-    const startDPTime = startTime.toLocaleTimeString('de-DE', options);
+    try {
+        // 1. API-Antwort in interne Listenstruktur umwandeln
+        const list = array.map(entry => {
+            const endtime   = Date.parse(entry.period_end);
+            const startTime = new Date(endtime - 1800000); // 30 min zurück
+            return {
+                starttime:  startTime / 1000,
+                endtime:    endtime / 1000,
+                wert1:      Math.round(_prognoseWert(entry, CFG.prognose1) * 1000),  // W
+                wert2:      Math.round(_prognoseWert(entry, CFG.prognose2) * 1000),
+            };
+        });
 
-    let ind = 0;
+        // Startzeit des ersten API-Slots (für Einstiegspunkt im DP-Index)
+        const firstSlotTime = new Date(list[0].starttime * 1000)
+            .toLocaleTimeString('de-DE', TIME_OPTIONS);
 
-    setTimeout(function () {   // warte falls dp noch nicht angelegt
-        // finde startzeit
-        for (ind = 0; ind < _hours * 2; ind++) {
-            const startTimeind = getState(mainObjectToday + '.' + seite + '.' + ind + '.startTime').val;
-            if (startDPTime == startTimeind) {               
-                break;
-            }
-        }
+        // 500ms warten damit initialPV()-Datenpunkte sicher existieren
+        setTimeout(() => _schreibeDaten(list, seite, firstSlotTime), 500);
 
-        // console.warn('start ind ' + ind + ' auf seite ' + seite);
-
-        let listenDP = -1;    // damit ich auf 0 komme bei ersten lauf
-        let posiA = ind - 1;
-        let schonGebucht = false;
-        
-        let wertW1Ges = 0;
-        let wertW2Ges = 0;
-
-        for (let a = 0; a < _hours * 4; a++) {
-            listenDP += 1;
-
-            if (list[listenDP] == undefined) {
-                break;
-            }
-
-            const starttt       = new Date(list[listenDP].starttime * 1000);
-            const endtt         = new Date(list[listenDP].endtime * 1000);
-            const startTime     = starttt.toLocaleTimeString('de-DE', options);
-            const endTime       = endtt.toLocaleTimeString('de-DE', options);
-
-            if (startTime == _abbrechenBei) {   // wir brauchen nur bis nachts
-                if (schonGebucht) {
-                    break;
-                }
-                if (!schonGebucht) {
-                    heute = false;
-                    posiA = -1;                     
-                    schonGebucht = true;
-                }
-            }
-
-            posiA += 1;
-
-            let stateBaseName1 = `${mainObjectToday}.${seite1}.${posiA}.`;
-            let stateBaseName2 = ``;
-            
-            if (seite2.length > 0) {
-                stateBaseName2 = `${mainObjectToday}.${seite2}.${posiA}.`;
-            }
-            
-            let stateBaseNameGes = `${mainObjectToday}.${gesamt}.${posiA}.`;
-
-            if (!heute) {
-                stateBaseName1 = `${mainObjectTomorrow}.${seite1}.${posiA}.`;
-                if (seite2.length > 0) {
-                    stateBaseName2 = `${mainObjectTomorrow}.${seite2}.${posiA}.`;
-                }
-                stateBaseNameGes = `${mainObjectTomorrow}.${gesamt}.${posiA}.`;
-            }
-
-            let wertW1 = list[listenDP].wert1;      
-            let wertW2 = list[listenDP].wert2;
-
-            if (seite == seite1) {
-                setState(stateBaseName1 + 'power', wertW1, true);
-                setState(stateBaseName1 + 'power90', wertW2, true);
-                
-                let powerWName2   = 0;
-                let powerW90Name2 = 0;
-
-                if (seite2.length > 0) {
-                    powerWName2     = getState(stateBaseName2 + 'power').val;
-                    powerW90Name2   = getState(stateBaseName2 + 'power90').val;
-                }
-
-                wertW1Ges = wertW1 + powerWName2;
-                wertW2Ges = wertW2 + powerW90Name2;
-            }
-
-            if (seite == seite2 && seite2.length > 0) {
-                setState(stateBaseName2 + 'power', wertW1, true);
-                setState(stateBaseName2 + 'power90', wertW2, true);
-
-                const powerWName1 = getState(stateBaseName1 + 'power').val;
-                const power90WName1 = getState(stateBaseName1 + 'power90').val;
-
-                wertW1Ges = wertW1 + powerWName1;
-                wertW2Ges = wertW2 + power90WName1;
-            }                             
-
-            setState(stateBaseNameGes + 'power', parseInt((wertW1Ges).toFixed(3)), true);
-            setState(stateBaseNameGes + 'power90', parseInt((wertW2Ges).toFixed(3)), true);
-        }        
-        
-        genGraphAnlegen(true);    // erzeuge today
-        genGraphAnlegen(false);   // erzeuge tomorrow
-
-        setState(`${mainObject}.lastUpdated`, { val: moment().valueOf(), ack: true });
-        toLog(`Hole PV ${seite}`, true);
-        
-    }, 500); 
+    } catch (err) {
+        console.error(`[PV] datenErzeugen Fehler: ${err}`);
+    }
 }
 
+/**
+ * Extrahiert den gewünschten Prognosewert aus einem Solcast-Eintrag.
+ * @param {object} entry    - Einzelner Solcast forecast-Eintrag
+ * @param {number} modus    - 0=realistisch | 1=vorsichtig | 2=optimistisch
+ * @returns {number} Leistung in kW
+ */
+function _prognoseWert(entry, modus) {
+    switch (modus) {
+        case 1:  return entry.pv_estimate10;
+        case 2:  return entry.pv_estimate90;
+        default: return entry.pv_estimate;
+    }
+}
+
+/**
+ * Schreibt die verarbeiteten Prognose-Slots in die ioBroker-Datenpunkte.
+ * Erkennt automatisch den Übergang heute/morgen anhand '00:00' Uhrzeit.
+ *
+ * @param {Array}  list          - Interne Slot-Liste (starttime, wert1, wert2)
+ * @param {string} seite         - Aktive Seite ('garten' oder 'strasse')
+ * @param {string} firstSlotTime - Uhrzeit des ersten Slots (HH:MM) zum Index-Einstieg
+ */
+function _schreibeDaten(list, seite, firstSlotTime) {
+    // Einstiegspunkt im DP-Array finden (API liefert ggf. ab einer anderen Uhrzeit)
+    let startIndex = 0;
+    for (let i = 0; i < SLOTS_PER_DAY; i++) {
+        const dpTime = getState(`${DP.today}.${seite}.${i}.startTime`).val;
+        if (dpTime === firstSlotTime) {
+            startIndex = i;
+            break;
+        }
+    }
+
+    let heute        = true;    // Wechsel auf false nach '00:00' Slot
+    let posiA        = startIndex - 1;
+    let schonGebucht = false;
+
+    for (let listenDP = 0; listenDP < list.length; listenDP++) {
+        if (!list[listenDP]) break;
+
+        const slotStart = new Date(list[listenDP].starttime * 1000)
+            .toLocaleTimeString('de-DE', TIME_OPTIONS);
+
+        // Mitternacht erkannt → ab jetzt "morgen"-Datenpunkte beschreiben
+        if (slotStart === CFG.abbrechenBei) {
+            if (schonGebucht) break;    // zweite Mitternacht = Ende
+            heute        = false;
+            posiA        = -1;
+            schonGebucht = true;
+        }
+
+        posiA++;
+
+        const tag = heute ? DP.today : DP.tomorrow;
+
+        const dpSeite1  = `${tag}.${CFG.seite1}.${posiA}.`;
+        const dpSeite2  = CFG.seite2.length > 0 ? `${tag}.${CFG.seite2}.${posiA}.` : null;
+        const dpGesamt  = `${tag}.${CFG.gesamt}.${posiA}.`;
+
+        const wert1 = list[listenDP].wert1;
+        const wert2 = list[listenDP].wert2;
+
+        let wertGes1 = 0;
+        let wertGes2 = 0;
+
+        if (seite === CFG.seite1) {
+            setState(dpSeite1 + 'power',   wert1, true);
+            setState(dpSeite1 + 'power90', wert2, true);
+            const andereSeite1 = dpSeite2 ? (getState(dpSeite2 + 'power').val   ?? 0) : 0;
+            const andereSeite2 = dpSeite2 ? (getState(dpSeite2 + 'power90').val ?? 0) : 0;
+            wertGes1 = wert1 + andereSeite1;
+            wertGes2 = wert2 + andereSeite2;
+        } else if (seite === CFG.seite2 && dpSeite2) {
+            setState(dpSeite2 + 'power',   wert1, true);
+            setState(dpSeite2 + 'power90', wert2, true);
+            const andereSeite1 = getState(dpSeite1 + 'power').val   ?? 0;
+            const andereSeite2 = getState(dpSeite1 + 'power90').val ?? 0;
+            wertGes1 = wert1 + andereSeite1;
+            wertGes2 = wert2 + andereSeite2;
+        }
+
+        // Gesamt-DP: parseInt() um Dezimalstellen zu entfernen (Wert ist bereits in W)
+        setState(dpGesamt + 'power',   Math.round(wertGes1), true);
+        setState(dpGesamt + 'power90', Math.round(wertGes2), true);
+    }
+
+    // Graph und Tagessummen nach Datenschreiben aktualisieren
+    genGraphAnlegen(true);   // heute
+    genGraphAnlegen(false);  // morgen
+
+    setState(`${DP.base}.lastUpdated`, { val: moment().valueOf(), ack: true });
+    toLog(`[PV] Prognose ${seite} geschrieben`, true);
+}
+
+// ------------------------------------------------------------------------------------
+//  DATENPUNKTE INITIALISIEREN
+// ------------------------------------------------------------------------------------
+
+/**
+ * Initialisiert Datenpunkte für alle Seiten (heute + morgen).
+ * Wird täglich bei Sonnenaufgang aufgerufen.
+ * Legt Datenpunkte nur an wenn summeDpAnlegen=true, setzt sonst nur power/power90 auf 0.
+ */
 async function initialPV() {
-    await seiteAnlegen(seite1);
-    if (seite2.length > 0) {
-        await seiteAnlegen(seite2);
-    }
-    await seiteAnlegen(gesamt);
+    await seiteAnlegen(CFG.seite1);
+    if (CFG.seite2.length > 0) await seiteAnlegen(CFG.seite2);
+    await seiteAnlegen(CFG.gesamt);
 }
 
+/**
+ * Legt alle 48 Slots für heute und morgen einer Seite an.
+ * Startzeit und Endzeit werden nur bei summeDpAnlegen=true erzeugt (einmalig).
+ * power und power90 werden bei jedem Aufruf auf 0 initialisiert.
+ *
+ * @param {string} seite - Seiten-Name (seite1 | seite2 | gesamt)
+ */
 async function seiteAnlegen(seite) {
-    const stunden = 24;
-    const startTime = { hour: 0, minute: 30 };
-    let dp = mainObjectToday + '.' + seite + '.';
-    let ind = 0;
-
-    // Schleife zur Generierung der Zeitfolge today
-    if (summeDpAnlegen) {
-        for (let hour = 0; hour < stunden; hour++) {
-            for (let minute = 0; minute < 60; minute += 30) {
-
-                let stateBaseNameGes = dp + ind + '.';
-
-                if (ind < 48) {    
-                    createUserStates('0_userdata.0', false, [stateBaseNameGes + 'startTime', { 'name': 'Gultigkeitsbeginn (Uhrzeit)', 'type': 'string', 'read': true, 'write': false, 'role': 'state' }], function () {
-                        setStateAsync(stateBaseNameGes + 'startTime', formatTime(hour, minute), true);
-                    });                
-                }
-                ind += 1;
-            }
-        }
+    for (const tag of [DP.today, DP.tomorrow]) {
+        const istToday = (tag === DP.today);
+        await _slotsAnlegen(tag, seite, istToday);
     }
 
-    ind = 0;
-
-    for (let hour = startTime.hour; hour <= stunden; hour++) {
-        for (let minute = (hour === startTime.hour ? startTime.minute : 0); minute < 60; minute += 30) {
-
-            let stateBaseNameGes = dp + ind + '.';
-
-            if (ind < 48) {
-                if (hour == 24) {
-                    hour = 0;
-                }
-                if (summeDpAnlegen) {
-                    createUserStates('0_userdata.0', false, [stateBaseNameGes + 'endTime', { 'name': 'Gultigkeitsende (Uhrzeit)', 'type': 'string', 'read': true, 'write': false, 'role': 'state' }], function () {
-                        setStateAsync(stateBaseNameGes + 'endTime', formatTime(hour, minute), true);
-                    });
-                }
-
-                createUserStates('0_userdata.0', false, [stateBaseNameGes + 'power', { 'name': 'power', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-                    setStateAsync(stateBaseNameGes + 'power', 0, true);
-                });
-
-                createUserStates('0_userdata.0', false, [stateBaseNameGes + 'power90', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-                    setStateAsync(stateBaseNameGes + 'power90', 0, true);
-                });
-            }
-            ind += 1;
-        }
-    }
-
-    dp = mainObjectTomorrow + '.' + seite + '.';
-
-    // Schleife zur Generierung der Zeitfolge tomorrow
-    if (summeDpAnlegen) {
-        ind = 0;
-        for (let hour = 0; hour < stunden; hour++) {
-            for (let minute = 0; minute < 60; minute += 30) {
-
-                let stateBaseNameGes = dp + ind + '.';
-
-                if (ind < 48) {
-                    createUserStates('0_userdata.0', false, [stateBaseNameGes + 'startTime', { 'name': 'Gultigkeitsbeginn (Uhrzeit)', 'type': 'string', 'read': true, 'write': false, 'role': 'state' }], function () {
-                        setStateAsync(stateBaseNameGes + 'startTime', formatTime(hour, minute), true);
-                    });
-                }
-                ind += 1;
-            }
-        }
-    }
-
-    ind = 0;
-
-    for (let hour = startTime.hour; hour <= stunden; hour++) {
-        for (let minute = (hour === startTime.hour ? startTime.minute : 0); minute < 60; minute += 30) {
-
-            let stateBaseNameGes = dp + ind + '.';
-
-            if (ind < 48) {
-                if (hour == 24) {
-                    hour = 0;
-                }
-                if (summeDpAnlegen) {
-                    createUserStates('0_userdata.0', false, [stateBaseNameGes + 'endTime', { 'name': 'Gultigkeitsende (Uhrzeit)', 'type': 'string', 'read': true, 'write': false, 'role': 'state' }], function () {
-                        setStateAsync(stateBaseNameGes + 'endTime', formatTime(hour, minute), true);
-                    });
-                }
-
-                createUserStates('0_userdata.0', false, [stateBaseNameGes + 'power', { 'name': 'power', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-                    setStateAsync(stateBaseNameGes + 'power', 0, true);
-                });
-
-                createUserStates('0_userdata.0', false, [stateBaseNameGes + 'power90', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-                    setStateAsync(stateBaseNameGes + 'power90', 0, true);
-                });
-            }
-
-            ind += 1;
-        }
-    }
-
-    if (summeDpAnlegen) {
+    if (CFG.summeDpAnlegen) {
         await dPAnlegen(seite);
-    }   
-}
-
-async function dPAnlegen(seite) {
-    const dp = mainObject + '.';
-
-    createUserStates('0_userdata.0', true, [dp + 'lastUpdated', { 'name': 'Letztes Update (Daten)', 'type': 'number', 'read': true, 'write': false, 'role': 'value.time', 'def': 0 }], function () {
-        setStateAsync(dp + 'lastUpdated', 0, true);
-    });
-
-    createUserStates('0_userdata.0', true, [dp + 'response', { 'name': 'Abfrage array', 'type': 'string', 'read': true, 'write': false, 'role': 'state', 'def': '' }], function () {
-        setStateAsync(dp + 'response', '', true);
-    });
-
-    const dp1 = mainObjectToday + '.' + seite + '.';
-
-    createUserStates('0_userdata.0', true, [dp1 + 'today_kW', { 'name': 'today_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-        setStateAsync(dp1 + 'today_kW', 0, true);
-    });
-
-    createUserStates('0_userdata.0', true, [mainObjectToday + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
-        setStateAsync(mainObjectToday + '.JSONGraph', '{}', true);
-    });
-
-    const dp2 = mainObjectTomorrow + '.' + seite + '.';
-
-    createUserStates('0_userdata.0', true, [dp2 + 'tomorrow_kW', { 'name': 'tomorrow_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
-        setStateAsync(dp2 + 'tomorrow_kW', 0, true);
-    });
-
-    createUserStates('0_userdata.0', true, [mainObjectTomorrow + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
-        setStateAsync(mainObjectTomorrow + '.JSONGraph', '{}', true);
-    });
-}
-
-//------------ graph
-
-function genGraphAnlegen(today) {
-    let mainObjectGraph = '';
-    let dayTag = '';
-
-    if (!today) {
-        mainObjectGraph = mainObjectTomorrow;
-        dayTag = 'tomorrow_kW';
-    } else {
-        mainObjectGraph = mainObjectToday;
-        dayTag = 'today_kW'
     }
-    const jsonGraphData = [];
-    const jsonGraphLabels = [];
+}
 
-    let powerWGes = 0;
-    let powerWGesName1 = 0;
-    let powerWGesName2 = 0;
-    
-    for (let posiA = 0; posiA < _hours * 2; posiA++) {
-    
-        let stateBaseNameGes = `${mainObjectGraph}.${gesamt}.${posiA}.`;
-        let stateBaseName1 = `${mainObjectGraph}.${seite1}.${posiA}.`;
-        let stateBaseName2 = ``;
+/**
+ * Erzeugt die 48 Zeitslots (0–47) für einen Tag und eine Seite.
+ * Zeitreihe beginnt immer um 00:30 und endet um 00:00 des nächsten Tages.
+ *
+ * @param {string}  tagDP   - Basispfad (today oder tomorrow)
+ * @param {string}  seite   - Seiten-Name
+ * @param {boolean} isToday - true = startTime beginnt bei 00:30, false = identisch
+ */
+async function _slotsAnlegen(tagDP, seite, isToday) {
+    const dp = `${tagDP}.${seite}.`;
+    let ind  = 0;
 
-        if (seite2.length > 0) {
-            stateBaseName2 = `${mainObjectGraph}.${seite2}.${posiA}.`;
-        }
-        const startTime = getState(stateBaseNameGes + 'startTime').val;
+    for (let hour = 0; hour <= 24; hour++) {
+        const minStart = (hour === 0) ? 30 : 0;    // erster Slot: 00:30
+        for (let minute = minStart; minute < 60; minute += 30) {
+            if (ind >= SLOTS_PER_DAY) break;
 
-        let powerWGesamt  = getState(stateBaseNameGes + 'power').val;
-        let powerWName1   = getState(stateBaseName1 + 'power').val;
-        let powerWName2   = 0;
-         
-        if (seite2.length > 0) {
-            powerWName2   = getState(stateBaseName2 + 'power').val;
-        }
+            const base = `${dp}${ind}.`;
+            const h    = hour === 24 ? 0 : hour;   // 24:00 → 00:00
 
-        powerWGes = powerWGes + powerWGesamt;
-        powerWGesName1 = powerWGesName1 + powerWName1;
-        if (seite2.length > 0) {
-            powerWGesName2 = powerWGesName2 + powerWName2;
-        }
-    
-        if (powerWGesamt > 0) {  
-            if (startTime.match(':00')) {   
-                jsonGraphLabels.push(startTime);                           
-                powerWGesamt = Number(Math.round((powerWGesamt * 100)/100)/1000);      
-                jsonGraphData.push(powerWGesamt);
-
-                if (_influxDb) {
-                    influxDdOutput(_influxDbMeasurementGesamt, startTime, powerWGesamt);
-                    influxDdOutput(_influxDbMeasurementGarten, startTime, powerWName1);
-                    influxDdOutput(_influxDbMeasurementStrasse, startTime, powerWName2);                    
-                }
+            if (CFG.summeDpAnlegen) {
+                // startTime nur einmalig anlegen
+                createUserStates(DP.userDataBase, false,
+                    [base + 'startTime', { name: 'Gültigkeitsbeginn', type: 'string', read: true, write: false, role: 'state' }],
+                    () => setStateAsync(base + 'startTime', formatTime(h - 1 < 0 ? 23 : h - 1, minute === 0 ? 30 : 0), true)
+                );
+                createUserStates(DP.userDataBase, false,
+                    [base + 'endTime', { name: 'Gültigkeitsende', type: 'string', read: true, write: false, role: 'state' }],
+                    () => setStateAsync(base + 'endTime', formatTime(h, minute), true)
+                );
             }
-        }       
+
+            // power und power90 immer anlegen / auf 0 zurücksetzen
+            createUserStates(DP.userDataBase, false,
+                [base + 'power', { name: 'Leistung (W)', type: 'number', read: true, write: false, role: 'value', def: 0, unit: 'W' }],
+                () => setStateAsync(base + 'power', 0, true)
+            );
+            createUserStates(DP.userDataBase, false,
+                [base + 'power90', { name: 'Leistung 90P (W)', type: 'number', read: true, write: false, role: 'value', def: 0, unit: 'W' }],
+                () => setStateAsync(base + 'power90', 0, true)
+            );
+
+            ind++;
+        }
+        if (ind >= SLOTS_PER_DAY) break;
     }
-    
-    setState(`${mainObjectGraph}.${seite1}.${dayTag}`,  Number(Math.round((powerWGesName1 /2/1000)*100)/100), true);
-    if (seite2.length > 0) {
-        setState(`${mainObjectGraph}.${seite2}.${dayTag}`,  Number(Math.round((powerWGesName2 /2/1000)*100)/100), true);
+}
+
+/**
+ * Legt einmalige Gesamt-Datenpunkte an (lastUpdated, response, kWh-Summen, Graphen).
+ * Nur aufrufen wenn summeDpAnlegen=true.
+ *
+ * @param {string} seite - Seiten-Name
+ */
+async function dPAnlegen(seite) {
+    const base = `${DP.base}.`;
+
+    const states = [
+        [base + 'lastUpdated',  { name: 'Letztes Update',   type: 'number', read: true, write: false, role: 'value.time', def: 0 }],
+        [base + 'response',     { name: 'API Rohantwort',   type: 'string', read: true, write: false, role: 'state',      def: '' }],
+        [`${DP.today}.${seite}.today_kW`,       { name: 'Tagesertrag heute',  type: 'number', read: true, write: false, role: 'value', def: 0, unit: 'kWh' }],
+        [`${DP.tomorrow}.${seite}.tomorrow_kW`, { name: 'Tagesertrag morgen', type: 'number', read: true, write: false, role: 'value', def: 0, unit: 'kWh' }],
+        [`${DP.today}.JSONGraph`,    { name: 'Diagrammdaten heute',  type: 'string', read: true, write: false, role: 'json', def: '{}' }],
+        [`${DP.tomorrow}.JSONGraph`, { name: 'Diagrammdaten morgen', type: 'string', read: true, write: false, role: 'json', def: '{}' }],
+    ];
+
+    for (const [key, meta] of states) {
+        createUserStates(DP.userDataBase, true, [key, meta], () => {});
     }
-    setState(`${mainObjectGraph}.${gesamt}.${dayTag}`, Number(Math.round((powerWGes /2/1000)*100)/100), true);
-
-    genGraph(jsonGraphLabels, jsonGraphData, mainObjectGraph);
 }
 
-function formatTime(hour, minute) {
-    return (hour < 10 ? '0' + hour : hour) + ':' + (minute < 10 ? '0' + minute : minute);
+// ------------------------------------------------------------------------------------
+//  GRAPH & TAGESSUMMEN
+// ------------------------------------------------------------------------------------
+
+/**
+ * Berechnet Tagessummen (kWh) und erzeugt den VIS Material-Design Balken-Graph.
+ * Schreibt optional Messwerte in InfluxDB.
+ *
+ * @param {boolean} today - true = heute | false = morgen
+ */
+function genGraphAnlegen(today) {
+    const tagDP      = today ? DP.today    : DP.tomorrow;
+    const kWhKey     = today ? 'today_kW'  : 'tomorrow_kW';
+
+    const graphData   = [];
+    const graphLabels = [];
+
+    let sumGesamt = 0;
+    let sumSeite1 = 0;
+    let sumSeite2 = 0;
+
+    for (let i = 0; i < SLOTS_PER_DAY; i++) {
+        const dpGes   = `${tagDP}.${CFG.gesamt}.${i}.`;
+        const dpS1    = `${tagDP}.${CFG.seite1}.${i}.`;
+        const dpS2    = CFG.seite2.length > 0 ? `${tagDP}.${CFG.seite2}.${i}.` : null;
+
+        const startTime   = getState(dpGes + 'startTime').val ?? '';
+        const powerGesamt = getState(dpGes + 'power').val     ?? 0;
+        const powerS1     = getState(dpS1  + 'power').val     ?? 0;
+        const powerS2     = dpS2 ? (getState(dpS2 + 'power').val ?? 0) : 0;
+
+        sumGesamt += powerGesamt;
+        sumSeite1 += powerS1;
+        sumSeite2 += powerS2;
+
+        // Für den Graph: nur volle Stunden (bessere Lesbarkeit), nur wenn Ertrag > 0
+        if (powerGesamt > 0 && startTime.endsWith(':00')) {
+            graphLabels.push(startTime);
+            const kW = Math.round(powerGesamt / 10) / 100;  // W → kW, 2 Dezimalstellen
+            graphData.push(kW);
+
+            if (CFG.influxAktiv) {
+                influxDdOutput(CFG.influxGesamt, startTime, kW);
+                influxDdOutput(CFG.influxSeite1, startTime, Math.round(powerS1 / 10) / 100);
+                if (dpS2) influxDdOutput(CFG.influxSeite2, startTime, Math.round(powerS2 / 10) / 100);
+            }
+        }
+    }
+
+    // Tagessummen in kWh (÷2 weil 30-min-Slots, ÷1000 W→kW, gerundet auf 2 Stellen)
+    const toKwh = (sumW) => Math.round((sumW / 2 / 1000) * 100) / 100;
+
+    setState(`${tagDP}.${CFG.seite1}.${kWhKey}`, toKwh(sumSeite1), true);
+    if (CFG.seite2.length > 0) {
+        setState(`${tagDP}.${CFG.seite2}.${kWhKey}`, toKwh(sumSeite2), true);
+    }
+    setState(`${tagDP}.${CFG.gesamt}.${kWhKey}`, toKwh(sumGesamt), true);
+
+    genGraph(graphLabels, graphData, tagDP);
 }
 
-function addLeadingZero(number) {
-    return number < 10 ? '0' + number : number;
-}
+// ------------------------------------------------------------------------------------
+//  VIS GRAPH
+// ------------------------------------------------------------------------------------
 
-async function influxDdOutput(influxDbMeasurementDP, startTime, powerW) {
-    const stTime = startTime + ':00';
-    let currentDate = new Date();
-    let formattedDate = currentDate.getFullYear() + '-' + addLeadingZero(currentDate.getMonth() + 1) + '-' + addLeadingZero(currentDate.getDate()) + ' ' + stTime;
-    await addToInfluxDB(influxDbMeasurementDP, moment(formattedDate).valueOf(), powerW);
-}
-
-async function genGraph(jsonGraphLabels, jsonGraphData, whichDay) {
-    let globalunit = 1000;
-
-    // https://github.com/Scrounger/ioBroker.vis-materialdesign/blob/master/README.md
-    const jsonGraph = {
-        // graph
-        data: jsonGraphData,
-        type: 'bar',
-        legendText: 'PV',
-        displayOrder: 1,
-        color: '#fffd00',
+/**
+ * Erzeugt das JSON für einen VIS Material-Design Balken-Graph und schreibt ihn in den DP.
+ * Dokumentation: https://github.com/Scrounger/ioBroker.vis-materialdesign
+ *
+ * @param {Array}  labels   - X-Achsenbeschriftungen (Uhrzeiten)
+ * @param {Array}  data     - Datenwerte in kW
+ * @param {string} tagDP    - Ziel-Datenpunkt-Pfad (today oder tomorrow)
+ */
+async function genGraph(labels, data, tagDP) {
+    const graphConfig = {
+        data:               data,
+        type:               'bar',
+        legendText:         'PV',
+        displayOrder:       1,
+        color:              '#fffd00',
         tooltip_AppendText: 'kW',
-        datalabel_show: true,
+        datalabel_show:     true,
         datalabel_rotation: 300,
-        datalabel_color: '#cccccc',
+        datalabel_color:    '#cccccc',
         datalabel_fontSize: 14,
-
-        // graph bar chart 
-        barIsStacked: true,
-        barStackId: 1,
-
-        // graph y-Axis
-        yAxis_id: 0,
-        yAxis_position: 'left',
-        yAxis_show: true,
-        yAxis_appendix: 'kW',
-        yAxis_step: 5,
-        yAxis_max: 13100 / globalunit,
+        barIsStacked:       true,
+        barStackId:         1,
+        yAxis_id:           0,
+        yAxis_position:     'left',
+        yAxis_show:         true,
+        yAxis_appendix:     'kW',
+        yAxis_step:         5,
+        yAxis_max:          13.1,       // 13.1 kW Anlagen-Maximum (anpassen!)
         yAxis_maximumDigits: 3,
     };
 
-    await this.setStateAsync(`${whichDay}.JSONGraph`, { val: JSON.stringify({ 'graphs': [jsonGraph], 'axisLabels': jsonGraphLabels }, null, 2), ack: true });
+    setState(`${tagDP}.JSONGraph`, {
+        val: JSON.stringify({ graphs: [graphConfig], axisLabels: labels }, null, 2),
+        ack: true,
+    });
 }
 
-async function addToInfluxDB(influxDbMeasurement, timestamp, value) {
+// ------------------------------------------------------------------------------------
+//  INFLUXDB EXPORT
+// ------------------------------------------------------------------------------------
+
+/**
+ * Schreibt einen Messwert mit Zeitstempel in InfluxDB.
+ * Der Zeitstempel wird aus dem aktuellen Datum + der übergebenen Uhrzeit konstruiert.
+ *
+ * @param {string} measurementDP - InfluxDB Measurement Datenpunkt-ID
+ * @param {string} startTime     - Uhrzeit im Format HH:MM
+ * @param {number} powerKw       - Leistung in kW
+ */
+async function influxDdOutput(measurementDP, startTime, powerKw) {
+    const now  = new Date();
+    const date = `${now.getFullYear()}-${_pad(now.getMonth() + 1)}-${_pad(now.getDate())} ${startTime}:00`;
+    await addToInfluxDB(measurementDP, moment(date).valueOf(), powerKw);
+}
+
+/**
+ * Sendet einen Wert mit Zeitstempel an InfluxDB via sendToAsync.
+ *
+ * @param {string} measurementDP - InfluxDB Measurement Datenpunkt-ID
+ * @param {number} timestamp     - Unix-Timestamp in ms
+ * @param {number} value         - Messwert
+ */
+async function addToInfluxDB(measurementDP, timestamp, value) {
     try {
-        const result = await this.sendToAsync(influxInstance, 'storeState', {
-            id: influxDbMeasurement,
-            state: {
-                ts: timestamp,
-                val: value,
-                ack: true,
-                from: `system.adapter.javascript`,
-                //q: 0
-            }
-        });			
+        await sendToAsync(CFG.influxInstanz, 'storeState', {
+            id: measurementDP,
+            state: { ts: timestamp, val: value, ack: true, from: 'system.adapter.javascript' },
+        });
     } catch (err) {
-        console.warn(`[addToInfluxDB] storeState error: ${err}`);
+        console.warn(`[PV] InfluxDB Fehler (${measurementDP}): ${err}`);
     }
 }
+
+// ------------------------------------------------------------------------------------
+//  HILFSFUNKTIONEN
+// ------------------------------------------------------------------------------------
+
+/**
+ * Formatiert Stunde und Minute als zweistelligen HH:MM String.
+ * @param {number} hour   - Stunde (0-23)
+ * @param {number} minute - Minute (0, 30)
+ * @returns {string} z.B. '09:30'
+ */
+function formatTime(hour, minute) {
+    return `${_pad(hour)}:${_pad(minute)}`;
+}
+
+/**
+ * Fügt führende Null hinzu wenn Zahl < 10.
+ * @param {number} n
+ * @returns {string}
+ */
+function _pad(n) {
+    return n < 10 ? '0' + n : String(n);
+}
+
+/**
+ * Liest die Sonnenaufgangs-Stunde aus dem javascript-Instanz-Datenpunkt.
+ * @returns {number} Stunde des Sonnenaufgangs (0-23)
+ */
+function _getSunriseHour() {
+    const sunup = getState(`${CFG.javascriptInstanz}.variables.astro.sunrise`).val ?? '06:00';
+    return parseInt(sunup.slice(0, 2), 10);
+}
+
+// ------------------------------------------------------------------------------------
+//  EVENT-HANDLER
+// ------------------------------------------------------------------------------------
+
+/**
+ * Reagiert auf Änderungen des Tagesertrags (today_kW im gesamt-DP).
+ * Aktiviert oder deaktiviert das prognosebasierte Batterieladen automatisch:
+ *  - Unter CFG.pvMin kWh → Prognose-Laden deaktivieren (zu wenig PV erwartet)
+ *  - Ab CFG.pvMin kWh   → Prognose-Laden aktivieren
+ * Wird nicht ausgeführt wenn manuelles Zeitladen aktiv ist.
+ */
+on({ id: DP.pvTodayGesamt + 'today_kW', change: 'any' }, (obj) => {
+    const kwhToday              = obj.state.val ?? 0;
+    const zeitLadenAktiv        = getState(DP.battLadenUhrzeitStart).val ?? false;
+    const prognoseDP            = DP.tibberBase + 'extra.prognoseNutzenAutomatisch';
+    const wolken                = getState('brightsky.0.daily.00.day.cloud_cover').val;
+
+    if (zeitLadenAktiv) return;     // manuelles Zeitladen hat Vorrang
+
+    if (kwhToday > 0 && kwhToday < CFG.pvMin) {
+        setState(prognoseDP, false, true);
+        console.info(`[PV] Prognose ${kwhToday} kWh < ${CFG.pvMin} kWh → Prognose-Laden deaktiviert`);
+    } else if (kwhToday >= CFG.pvMin) {
+        setState(prognoseDP, true, true);
+        console.info(`[PV] Prognose ${kwhToday} kWh ≥ ${CFG.pvMin} kWh → Prognose-Laden aktiviert`);
+    }
+
+    if (wolken > 80) {
+        setState(prognoseDP, false, true);
+        console.info(`[PV] Prognose ${kwhToday} kWh < ${CFG.pvMin} kWh → Prognose-Laden deaktiviert. Wolkenwert ${wolken} % `);    
+    }
+
+});

@@ -1,62 +1,126 @@
+// @ts-ignore
 const moment = require('moment');
 const options = { hour12: false, hour: '2-digit', minute: '2-digit' };
 
-// zum ändern ab hier
+// welche javascript instanz wird genutzt, für diese muss in Einstellungen ASTRO Zeit generierung aktiviert sein 
+const javascriptI = 'javascript.0';    
 
+// zum ändern ab hier
 const summeDpAnlegen = false;   // einmalig manuell für 24h auf true setzten, es werden summen Dp's angelegt   <<<<<<<<-----------------------------------  wichtig
 
-const seite1 = "xxxx-xxxx-xxxx-xxxx";
-const seite2 = "yyyy-yyyy-yyyy-yyyy";
-const key_id = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-const name1 = 'garten';         // name dp1  frei wählbar  
-const name2 = 'strasse';        // name dp2  frei wählbar
-const gesamt = 'gesamt';        // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
+const key_id    = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
 
+const seite1    = 'garten';                     // name dp1  frei wählbar, sonne vormittags 
+const seite1Key = "xxxx-xxxx-xxxx-xxxx";
 
-const influxDb                      = true;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
-const influxInstance                = 'influxdb.0';
+const seite2    = 'strasse';                    //name dp2  frei wählbar, sonne nachmittags, leer wenn nur eine Seite genutzt wird
+const seite2Key = "yyyy-yyyy-yyyy-yyyy";        // nicht ändern wenn nicht genutzt
+
+const gesamt    = 'gesamt';                     // dp für zusammenrechnen muss in ladenNachPrognose angepasst werden wenn hier geändert
+
+const _influxDb                     = false;   // wenn grafana output erwünscht benötigt wird eine influx.0 instanz
+const  influxInstance               = 'influxdb.0';
 const _influxDbMeasurementGesamt    = 'pvforecast.0.summary.power';
 const _influxDbMeasurementStrasse   = 'pvforecast.0.plants.strasse.power';
 const _influxDbMeasurementGarten    = 'pvforecast.0.plants.garten.power';
 
-
 const mainObject            = '0_userdata.0.strom.pvforecast';
 const mainObjectToday       = '0_userdata.0.strom.pvforecast.today';
 const mainObjectTomorrow    = '0_userdata.0.strom.pvforecast.tomorrow';
-const abbrechenBei          = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
+const _abbrechenBei         = '00:00';   // ab wieviel Uhr kommt nix mehr, kann so bleiben
 
+// pv_estimate   – Der Realist: Dies ist sozusagen die Standardvorhersage. Denk an ihn als den durchschnittlichen Wert, basierend auf den aktuellen Wetterdaten und Modellen. Er sagt uns, was wir in einem normalen Szenario erwarten können – weder zu optimistisch noch zu pessimistisch.
+// pv_estimate10 – Der Vorsichtige: Jetzt wird's interessant. Dieser Wert ist die 10. Perzentile, also eher auf der niedrigen Seite. Er sagt uns, dass es eine 90 %ige Chance gibt, dass die tatsächliche Leistung höher ausfällt. Wenn du also lieber auf Nummer sicher gehst und nicht gerne enttäuscht wirst, ist das dein Wert.
+// pv_estimate90 – Der Optimist: Im Gegensatz zum pv_estimate10 zeigt uns der pv_estimate90 die sonnige Seite. Dieser Wert ist die 90. Perzentile – eine Art Best-Case-Szenario. Hier sagen die Daten, dass es nur eine 10 %ige Chance gibt, dass die Leistung diesen Wert überschreitet. Ideal, wenn du die Dinge gerne von der besten Seite betrachtest.​
+let prognose1              = 1;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
+let prognose2              = 0;    // 0 = realistisch, 1 = vorsichtig, 2 = optimistisch
+const ersteTagAbfrage      = seite2;   // wir brauchen morgends werte, welche Seite soll zuerst abgefragt werden
+
+//-------------------------------------------------------------
 
 const _baseUrl = "https://api.solcast.com.au/rooftop_sites/";
 const _hours = 24;
+
+let _tickerAbholung = 0;
+let _errorMrk = false;
+
+let _aufrufUrl   = '';
+let _aufrufSeite = '';
+
 // ------------------------------------------------------------------------------------------------------------------
 
+//                       zum testen
+//const testDaten = getState(`${mainObject}.response`).val;
+//datenErzeugen(JSON.parse(testDaten), seite2);
+
 //  initialisiere einmal in den nacht um 2 Uhr
-//schedule('0 2 * * *', function () {
-//    initialPV();
-//});
+schedule({ astro: 'sunset' }, () => {
+    _tickerAbholung = 0;
+});
 
 schedule({ astro: 'sunrise' }, () => {
     initialPV();
 
-    let url = `${seite2}/forecasts?format=json&api_key=${key_id}`;
-    toLog(`Hole PV ${name2}`, true);
-    requestData(url, name2);
+    if (seite2.length > 0) {
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite2;
+        toLog(`Hole PV ${_aufrufSeite}`, true);
+        requestData(_aufrufUrl, _aufrufSeite);
+    }
 
-    url = `${seite1}/forecasts?format=json&api_key=${key_id}`;
-    toLog(`Hole PV ${name1}`, true);
-    requestData(url, name1);
+    _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
+    _aufrufSeite = seite1;
+    toLog(`Hole PV ${_aufrufSeite}`, true);
+    requestData(_aufrufUrl, _aufrufSeite);
+
+    _tickerAbholung = +1;
 });
 
 
+schedule('1 6 * * *', function () {   // um 6 immer abholen damit wir morgen gültige Tageswerte haben    
+    if (_tickerAbholung < 1) {     // wurde schon mal abgeholt
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = ersteTagAbfrage;
+        requestData(_aufrufUrl, _aufrufSeite);
+    }
+});
+
 // 10 request sind frei bei solcast.com
-schedule('1 6,7,9,10 * * *', function () {
-    const url = `${seite2}/forecasts?format=json&api_key=${key_id}`;
-    requestData(url, name2);
+schedule('1 7,9,10 * * *', function () {
+    const _hhJetzt  = getHH();
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
+    
+    let seite = seite1;
+    if (seite2.length > 0) { 
+        seite = seite2;
+    }
+
+    if (_hhJetzt >= parseInt(sunup.slice(0, 2)) && seite2.length > 0) {  
+        _aufrufUrl   = `${seite2Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite;
+        requestData(_aufrufUrl, _aufrufSeite);
+        _tickerAbholung = +1;
+    }
 });
 
 schedule('2 8,12,13,15 * * *', function () {
-    const url = `${seite1}/forecasts?format=json&api_key=${key_id}`;
-    requestData(url, name1);
+    const _hhJetzt            = getHH();
+    const sunup = getState(javascriptI + '.variables.astro.sunrise').val;  
+    
+    if (_hhJetzt >= parseInt(sunup.slice(0, 2))) {     
+        _aufrufUrl   = `${seite1Key}/forecasts?format=json&api_key=${key_id}`;
+        _aufrufSeite = seite1;
+        requestData(_aufrufUrl, _aufrufSeite);
+        _tickerAbholung = +1;
+    }
+});
+ 
+schedule('5,10,15 * * * *', function () {
+    if (_errorMrk) {
+        toLog(`ERROR - Hole PV ${_aufrufSeite} ticker ${_tickerAbholung}`, true);
+        requestData(_aufrufUrl, _aufrufSeite);
+        _tickerAbholung = +1;
+    }
 });
  
 // ------------------------------------------------------------------------------------------------------------------
@@ -65,141 +129,181 @@ schedule('2 8,12,13,15 * * *', function () {
 
 async function requestData(seiteUrl, seite) {
     const url = `${_baseUrl}${seiteUrl}`;   
-    
-    httpGet(url, { timeout: 5000, responseType: 'text' }, async (err, response) => {
+    _errorMrk = false;
+
+    httpGet(url, { timeout: 9000, responseType: 'text' }, async (err, response) => {
         if (err) {
-            console.error(err);
-        } else {
+            _errorMrk = true;
+            console.error(err);           
+        } else {           
             const jsonData  = JSON.parse(response.data);
             const array     = jsonData.forecasts;
             
-            //console.warn(JSON.stringify(array));
+            setState(`${mainObject}.response`, JSON.stringify(array), true);
 
-            const list = [];     
-
-            let heute = true;
-
-            for (let i = 0; i < array.length; i++) {
-                const endtime = Date.parse(array[i].period_end);
-                const startTime = new Date(endtime - 1800000);
-                const readpwr = array[i].pv_estimate;
-                const readpwr90 = array[i].pv_estimate90;
-                const watt = Math.round(readpwr * 1000);
-
-                list[i] = {
-                    time: startTime / 1000,
-                    watt: watt,
-                    watt90: Math.round(readpwr90 * 1000),
-                };
-            }
-
-            const startTime = new Date(list[0].time * 1000);
-            const startDPTime = startTime.toLocaleTimeString('de-DE', options);
-
-            let ind = 0;
-
-            setTimeout(function () {   // warte falls dp noch nicht angelegt
-                // finde startzeit
-                for (ind = 0; ind < _hours * 2; ind++) {
-                    const startTimeind = getState(mainObjectToday + '.' + seite + '.' + ind + '.startTime').val;
-                    if (startDPTime == startTimeind) {
-                        break;
-                    }
-                }
-
-                //console.warn('start ind ' + ind + ' auf seite ' + seite);
-
-                let listenDP = -1;    // damit ich auf 0 komme bei ersten lauf
-                let posiA = ind - 1;
-                let schonGebucht = false;
-                
-                let powerWGes = 0;
-                let power90WGes = 0;
-
-                for (let a = 0; a < _hours * 4; a++) {
-                    listenDP += 1;
-
-                    if (list[listenDP] == undefined) {
-                        break;
-                    }
-
-                    const start = new Date(list[listenDP].time * 1000);
-                    //const end = new Date(list[listenDP].time * 1000 + 1800000);
-
-                    const startTime = start.toLocaleTimeString('de-DE', options);
-                    //const endTime = end.toLocaleTimeString('de-DE', options);
-
-                    if (startTime == abbrechenBei) {   // wir brauchen nur bis nachts
-                        if (schonGebucht) {
-                            break;
-                        }
-                        if (!schonGebucht) {
-                            heute = false;
-                            posiA = -1;                     
-                            schonGebucht = true;
-                        }
-                    }
-
-                    posiA += 1;
-
-                    let stateBaseName1 = `${mainObjectToday}.${name1}.${posiA}.`;
-                    let stateBaseName2 = `${mainObjectToday}.${name2}.${posiA}.`;
-                    let stateBaseNameGes = `${mainObjectToday}.${gesamt}.${posiA}.`;
-
-                    if (!heute) {
-                        stateBaseName1 = `${mainObjectTomorrow}.${name1}.${posiA}.`;
-                        stateBaseName2 = `${mainObjectTomorrow}.${name2}.${posiA}.`;
-                        stateBaseNameGes = `${mainObjectTomorrow}.${gesamt}.${posiA}.`;
-                    }
-
-                    //const powerW = list[listenDP].watt / 2;      // es kommen 2 DP pro stunde also teilen
-                    //const power90W = list[listenDP].watt90 / 2;
-
-                    const powerW = list[listenDP].watt;      
-                    const power90W = list[listenDP].watt90;
-
-                    if (seite == name1) {
-                        setState(stateBaseName1 + 'power', powerW, true);
-                        setState(stateBaseName1 + 'power90', power90W, true);
-                        
-                        const powerWName2 = getState(stateBaseName2 + 'power').val;
-                        const powerW90Name2 = getState(stateBaseName2 + 'power90').val;
-
-                        powerWGes = powerW + powerWName2;
-                        power90WGes = power90W + powerW90Name2;
-                    }
-
-                    if (seite == name2) {
-                        setState(stateBaseName2 + 'power', powerW, true);
-                        setState(stateBaseName2 + 'power90', power90W, true);
-
-                        const powerWName1 = getState(stateBaseName1 + 'power').val;
-                        const power90WName1 = getState(stateBaseName1 + 'power90').val;
-
-                        powerWGes = powerW + powerWName1;
-                        power90WGes = power90W + power90WName1;
-                    }                             
-
-                    setState(stateBaseNameGes + 'power', parseInt((powerWGes).toFixed(3)), true);
-                    setState(stateBaseNameGes + 'power90', parseInt((power90WGes).toFixed(3)), true);               
-                }
-
-                genGraphAnlegen(true);    // erzeuge today
-                genGraphAnlegen(false);   // erzeuge tomorrow
-
-                setState(`${mainObject}.lastUpdated`, { val: moment().valueOf(), ack: true });
-                toLog(`Hole PV ${seite}`, true);
-                
-            }, 500);        
+            datenErzeugen(array, seite);       
         };
     });
 }
 
 // --------------------------------------------------------------------
 
+function datenErzeugen(array, seite) {
+    const list          = [];  
+    let heute           = true;
+
+    for (let i = 0; i < array.length; i++) {                              
+        const endtime   = Date.parse(array[i].period_end);
+        const startTime = new Date(endtime - 1800000);
+
+        let wert1   = array[i].pv_estimate;
+        let wert2   = array[i].pv_estimate;
+
+        switch(prognose1) {
+            case 1:
+                wert1 = array[i].pv_estimate10;
+                break;
+            case 2:
+                wert1 = array[i].pv_estimate90;
+                break;
+            default:
+                // nix
+        } 
+
+        switch(prognose2) {
+            case 1:
+                wert2 = array[i].pv_estimate10;
+                break;
+            case 2:
+                wert2 = array[i].pv_estimate90;
+                break;
+            default:
+                // nix
+        } 
+
+        list[i] = {
+            starttime: startTime / 1000,
+            endtime: endtime / 1000,
+            wert1: Math.round(wert1 * 1000),
+            wert2: Math.round(wert2 * 1000),
+        };
+
+     //   console.warn('list ' + JSON.stringify(list));
+    }
+
+    const startTime = new Date(list[0].starttime * 1000);
+    const startDPTime = startTime.toLocaleTimeString('de-DE', options);
+
+    let ind = 0;
+
+    setTimeout(function () {   // warte falls dp noch nicht angelegt
+        // finde startzeit
+        for (ind = 0; ind < _hours * 2; ind++) {
+            const startTimeind = getState(mainObjectToday + '.' + seite + '.' + ind + '.startTime').val;
+            if (startDPTime == startTimeind) {               
+                break;
+            }
+        }
+
+        // console.warn('start ind ' + ind + ' auf seite ' + seite);
+
+        let listenDP = -1;    // damit ich auf 0 komme bei ersten lauf
+        let posiA = ind - 1;
+        let schonGebucht = false;
+        
+        let wertW1Ges = 0;
+        let wertW2Ges = 0;
+
+        for (let a = 0; a < _hours * 4; a++) {
+            listenDP += 1;
+
+            if (list[listenDP] == undefined) {
+                break;
+            }
+
+            const starttt       = new Date(list[listenDP].starttime * 1000);
+            const endtt         = new Date(list[listenDP].endtime * 1000);
+            const startTime     = starttt.toLocaleTimeString('de-DE', options);
+            const endTime       = endtt.toLocaleTimeString('de-DE', options);
+
+            if (startTime == _abbrechenBei) {   // wir brauchen nur bis nachts
+                if (schonGebucht) {
+                    break;
+                }
+                if (!schonGebucht) {
+                    heute = false;
+                    posiA = -1;                     
+                    schonGebucht = true;
+                }
+            }
+
+            posiA += 1;
+
+            let stateBaseName1 = `${mainObjectToday}.${seite1}.${posiA}.`;
+            let stateBaseName2 = ``;
+            
+            if (seite2.length > 0) {
+                stateBaseName2 = `${mainObjectToday}.${seite2}.${posiA}.`;
+            }
+            
+            let stateBaseNameGes = `${mainObjectToday}.${gesamt}.${posiA}.`;
+
+            if (!heute) {
+                stateBaseName1 = `${mainObjectTomorrow}.${seite1}.${posiA}.`;
+                if (seite2.length > 0) {
+                    stateBaseName2 = `${mainObjectTomorrow}.${seite2}.${posiA}.`;
+                }
+                stateBaseNameGes = `${mainObjectTomorrow}.${gesamt}.${posiA}.`;
+            }
+
+            let wertW1 = list[listenDP].wert1;      
+            let wertW2 = list[listenDP].wert2;
+
+            if (seite == seite1) {
+                setState(stateBaseName1 + 'power', wertW1, true);
+                setState(stateBaseName1 + 'power90', wertW2, true);
+                
+                let powerWName2   = 0;
+                let powerW90Name2 = 0;
+
+                if (seite2.length > 0) {
+                    powerWName2     = getState(stateBaseName2 + 'power').val;
+                    powerW90Name2   = getState(stateBaseName2 + 'power90').val;
+                }
+
+                wertW1Ges = wertW1 + powerWName2;
+                wertW2Ges = wertW2 + powerW90Name2;
+            }
+
+            if (seite == seite2 && seite2.length > 0) {
+                setState(stateBaseName2 + 'power', wertW1, true);
+                setState(stateBaseName2 + 'power90', wertW2, true);
+
+                const powerWName1 = getState(stateBaseName1 + 'power').val;
+                const power90WName1 = getState(stateBaseName1 + 'power90').val;
+
+                wertW1Ges = wertW1 + powerWName1;
+                wertW2Ges = wertW2 + power90WName1;
+            }                             
+
+            setState(stateBaseNameGes + 'power', parseInt((wertW1Ges).toFixed(3)), true);
+            setState(stateBaseNameGes + 'power90', parseInt((wertW2Ges).toFixed(3)), true);
+        }        
+        
+        genGraphAnlegen(true);    // erzeuge today
+        genGraphAnlegen(false);   // erzeuge tomorrow
+
+        setState(`${mainObject}.lastUpdated`, { val: moment().valueOf(), ack: true });
+        toLog(`Hole PV ${seite}`, true);
+        
+    }, 500); 
+}
+
 async function initialPV() {
-    await seiteAnlegen(name1);
-    await seiteAnlegen(name2);
+    await seiteAnlegen(seite1);
+    if (seite2.length > 0) {
+        await seiteAnlegen(seite2);
+    }
     await seiteAnlegen(gesamt);
 }
 
@@ -306,37 +410,40 @@ async function seiteAnlegen(seite) {
     }
 
     if (summeDpAnlegen) {
-        await kWAnlegen(seite);
+        await dPAnlegen(seite);
     }   
 }
 
-async function kWAnlegen(seite) {
+async function dPAnlegen(seite) {
     const dp = mainObject + '.';
 
-    createUserStates('0_userdata.0', true, [dp + 'lastUpdated', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value.time', 'def': 0 }], function () {
+    createUserStates('0_userdata.0', true, [dp + 'lastUpdated', { 'name': 'Letztes Update (Daten)', 'type': 'number', 'read': true, 'write': false, 'role': 'value.time', 'def': 0 }], function () {
         setStateAsync(dp + 'lastUpdated', 0, true);
+    });
+
+    createUserStates('0_userdata.0', true, [dp + 'response', { 'name': 'Abfrage array', 'type': 'string', 'read': true, 'write': false, 'role': 'state', 'def': '' }], function () {
+        setStateAsync(dp + 'response', '', true);
     });
 
     const dp1 = mainObjectToday + '.' + seite + '.';
 
-    createUserStates('0_userdata.0', true, [dp1 + 'today_kW', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
+    createUserStates('0_userdata.0', true, [dp1 + 'today_kW', { 'name': 'today_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
         setStateAsync(dp1 + 'today_kW', 0, true);
     });
 
-    createUserStates('0_userdata.0', true, [mainObjectToday + '.JSONGraph', { 'name': 'power90', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
+    createUserStates('0_userdata.0', true, [mainObjectToday + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
         setStateAsync(mainObjectToday + '.JSONGraph', '{}', true);
     });
 
     const dp2 = mainObjectTomorrow + '.' + seite + '.';
 
-    createUserStates('0_userdata.0', true, [dp2 + 'tomorrow_kW', { 'name': 'power90', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
+    createUserStates('0_userdata.0', true, [dp2 + 'tomorrow_kW', { 'name': 'tomorrow_kW', 'type': 'number', 'read': true, 'write': false, 'role': 'value', 'def': 0, 'unit': 'W' }], function () {
         setStateAsync(dp2 + 'tomorrow_kW', 0, true);
     });
 
-    createUserStates('0_userdata.0', true, [mainObjectTomorrow + '.JSONGraph', { 'name': 'power90', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
+    createUserStates('0_userdata.0', true, [mainObjectTomorrow + '.JSONGraph', { 'name': 'Diagrammdaten', 'type': 'string', 'read': true, 'write': false, 'role': 'json', 'def': '{}' }], function () {
         setStateAsync(mainObjectTomorrow + '.JSONGraph', '{}', true);
     });
-
 }
 
 //------------ graph
@@ -358,26 +465,31 @@ function genGraphAnlegen(today) {
     let powerWGes = 0;
     let powerWGesName1 = 0;
     let powerWGesName2 = 0;
-    //let power90WGes = 0;
     
     for (let posiA = 0; posiA < _hours * 2; posiA++) {
     
         let stateBaseNameGes = `${mainObjectGraph}.${gesamt}.${posiA}.`;
-        let stateBaseName1 = `${mainObjectGraph}.${name1}.${posiA}.`;
-        let stateBaseName2 = `${mainObjectGraph}.${name2}.${posiA}.`;
+        let stateBaseName1 = `${mainObjectGraph}.${seite1}.${posiA}.`;
+        let stateBaseName2 = ``;
 
+        if (seite2.length > 0) {
+            stateBaseName2 = `${mainObjectGraph}.${seite2}.${posiA}.`;
+        }
         const startTime = getState(stateBaseNameGes + 'startTime').val;
 
         let powerWGesamt  = getState(stateBaseNameGes + 'power').val;
         let powerWName1   = getState(stateBaseName1 + 'power').val;
-        let powerWName2   = getState(stateBaseName2 + 'power').val;
+        let powerWName2   = 0;
          
-        //const power90W = getState(stateBaseNameGes + 'power90').val / 2;
+        if (seite2.length > 0) {
+            powerWName2   = getState(stateBaseName2 + 'power').val;
+        }
 
         powerWGes = powerWGes + powerWGesamt;
         powerWGesName1 = powerWGesName1 + powerWName1;
-        powerWGesName2 = powerWGesName2 + powerWName2;
-        //power90WGes = power90WGes + power90W;
+        if (seite2.length > 0) {
+            powerWGesName2 = powerWGesName2 + powerWName2;
+        }
     
         if (powerWGesamt > 0) {  
             if (startTime.match(':00')) {   
@@ -385,7 +497,7 @@ function genGraphAnlegen(today) {
                 powerWGesamt = Number(Math.round((powerWGesamt * 100)/100)/1000);      
                 jsonGraphData.push(powerWGesamt);
 
-                if (influxDb) {
+                if (_influxDb) {
                     influxDdOutput(_influxDbMeasurementGesamt, startTime, powerWGesamt);
                     influxDdOutput(_influxDbMeasurementGarten, startTime, powerWName1);
                     influxDdOutput(_influxDbMeasurementStrasse, startTime, powerWName2);                    
@@ -394,8 +506,10 @@ function genGraphAnlegen(today) {
         }       
     }
     
-    setState(`${mainObjectGraph}.${name1}.${dayTag}`,  Number(Math.round((powerWGesName1 /2/1000)*100)/100), true);
-    setState(`${mainObjectGraph}.${name2}.${dayTag}`,  Number(Math.round((powerWGesName2 /2/1000)*100)/100), true);
+    setState(`${mainObjectGraph}.${seite1}.${dayTag}`,  Number(Math.round((powerWGesName1 /2/1000)*100)/100), true);
+    if (seite2.length > 0) {
+        setState(`${mainObjectGraph}.${seite2}.${dayTag}`,  Number(Math.round((powerWGesName2 /2/1000)*100)/100), true);
+    }
     setState(`${mainObjectGraph}.${gesamt}.${dayTag}`, Number(Math.round((powerWGes /2/1000)*100)/100), true);
 
     genGraph(jsonGraphLabels, jsonGraphData, mainObjectGraph);
